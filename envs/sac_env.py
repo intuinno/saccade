@@ -223,6 +223,7 @@ class SaccadeEnv(gym.Env):
         if self.window is not None:
             pygame.display.quit()
             pygame.quit()
+            self.window = None
 
 
 class SaccadeEnvAdapter:

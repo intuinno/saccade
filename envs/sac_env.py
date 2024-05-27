@@ -60,8 +60,7 @@ class SaccadeEnv(gym.Env):
     def reset(self, seed=None):
         # super().reset(seed=seed)
         self._reset()
-        self.observation = self._get_obsv()
-        self.info = self._get_info()
+        self.observation, self.info = self._get_obsv()
 
         if self.render_mode == "human":
             self._render_frame()
@@ -113,10 +112,8 @@ class SaccadeEnv(gym.Env):
             "peripheral": self.peri_vision,
             # "loc": self.loc,
         }
-        return observation
-
-    def _get_info(self):
-        return {"canvas": self.canvas}
+        info = {"canvas": self.canvas, "loc": self.loc}
+        return observation, info
 
     def _build_canvas(self, patch, pos):
         x, y = pos.to(dtype=torch.int)
@@ -143,8 +140,7 @@ class SaccadeEnv(gym.Env):
             done = False
 
         self.loc = action
-        self.observation = self._get_obsv()
-        self.info = self._get_info()
+        self.observation, self.info = self._get_obsv()
 
         if self.render_mode == "human":
             self._render_frame()

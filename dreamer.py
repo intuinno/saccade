@@ -44,15 +44,15 @@ class Dreamer(nn.Module):
         self._update_count = 0
         self._dataset = dataset
         self._wm = models.WorldModel(obs_space, act_space, self._step, config)
-        self._task_behavior = models.ImagBehavior(config, self._wm)
+        # self._task_behavior = models.ImagBehavior(config, self._wm)
         if (
             config.compile and os.name != "nt"
         ):  # compilation is not supported on windows
             self._wm = torch.compile(self._wm)
-            self._task_behavior = torch.compile(self._task_behavior)
+            # self._task_behavior = torch.compile(self._task_behavior)
         reward = lambda f, s, a: self._wm.heads["reward"](f).mean()
         self._expl_behavior = dict(
-            greedy=lambda: self._task_behavior,
+            # greedy=lambda: self._task_behavior,
             random=lambda: expl.Random(config, act_space),
             plan2explore=lambda: expl.Plan2Explore(config, self._wm, reward),
         )[config.expl_behavior]().to(self._config.device)
@@ -96,15 +96,16 @@ class Dreamer(nn.Module):
         if self._config.eval_state_mean:
             latent["stoch"] = latent["mean"]
         feat = self._wm.dynamics.get_feat(latent)
-        if not training:
-            actor = self._task_behavior.actor(feat)
-            action = actor.mode()
-        elif self._should_expl(self._step):
+        # if not training:
+        # actor = self._task_behavior.actor(feat)
+        # action = actor.mode()
+        if self._should_expl(self._step):
             actor = self._expl_behavior.actor(feat)
             action = actor.sample()
         else:
-            actor = self._task_behavior.actor(feat)
-            action = actor.sample()
+            raise NotImplementedError(self._policy)
+            # actor = self._task_behavior.actor(feat)
+            # action = actor.sample()
         logprob = actor.log_prob(action)
         latent = {k: v.detach() for k, v in latent.items()}
         action = action.detach()
@@ -124,7 +125,7 @@ class Dreamer(nn.Module):
         reward = lambda f, s, a: self._wm.heads["reward"](
             self._wm.dynamics.get_feat(s)
         ).mode()
-        metrics.update(self._task_behavior._train(start, reward)[-1])
+        # metrics.update(self._task_behavior._train(start, reward)[-1])
         if self._config.expl_behavior != "greedy":
             mets = self._expl_behavior.train(start, context, data)[-1]
             metrics.update({"expl_" + key: value for key, value in mets.items()})

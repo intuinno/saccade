@@ -1,4 +1,6 @@
 setuptools==60.0.0
+wheel==0.38.4
+pygame==2.5.2
 torch==2.0.0
 torchvision==0.15.1
 pandas==1.2.4

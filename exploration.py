@@ -66,6 +66,7 @@ class Plan2Explore(nn.Module):
             layers=config.disag_layers,
             units=config.disag_units,
             act=config.act,
+            device=config.device,
         )
         self._networks = nn.ModuleList(
             [networks.MLP(**kw) for _ in range(config.disag_models)]

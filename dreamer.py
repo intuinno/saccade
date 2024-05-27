@@ -3,8 +3,9 @@ import functools
 import os
 import pathlib
 import sys
+import torchvision
 
-os.environ["MUJOCO_GL"] = "osmesa"
+os.environ["MUJOCO_GL"] = "glfw"
 
 import numpy as np
 import ruamel.yaml as yaml
@@ -193,6 +194,15 @@ def make_env(config, mode, id):
 
         env = minecraft.make_env(task, size=config.size, break_speed=config.break_speed)
         env = wrappers.OneHotAction(env)
+    elif suite == "saccade":
+        import envs.sac_env as sac_env
+
+        mnist = torchvision.datasets.MNIST("datasets", download=True)
+        images = mnist.data.numpy()[:1000]
+        env = sac_env.SaccadeEnvAdapter(images)
+
+        env = wrappers.OneHotAction(env)
+
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)

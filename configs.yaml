@@ -128,6 +128,18 @@ crafter:
   reward_head: {layers: 5}
   cont_head: {layers: 5}
   imag_gradient: 'reinforce'
+  expl_behavior: 'plan2explore'
+  expl_until: 10000000000000000
+  expl_extr_scale: 0.0
+  expl_intr_scale: 1.0
+  disag_target: 'stoch'
+  disag_log: True
+  disag_models: 10
+  disag_offset: 1
+  disag_layers: 4
+  disag_units: 400
+  disag_action_cond: True
+
 
 atari100k:
   steps: 4e5
@@ -176,9 +188,35 @@ memorymaze:
   imag_gradient: 'reinforce'
   task: 'memorymaze_9x9'
 
+saccade:
+  task: 'saccade_MMNIST'
+  encoder: {mlp_keys: '.*', cnn_keys: '$^'}
+  decoder: {mlp_keys: '.*', cnn_keys: '$^'}
+  envs: 2
+    # Exploration
+  expl_behavior: 'plan2explore'
+  expl_until: 10000000000000000
+  expl_extr_scale: 0.0
+  expl_intr_scale: 1.0
+  disag_target: 'stoch'
+  disag_log: True
+  disag_models: 10
+  disag_offset: 1
+  disag_layers: 4
+  disag_units: 400
+  disag_action_cond: True
+  actor: {layers: 5, dist: 'onehot', std: 'none'}
+  video_pred_log: False
+  
+  
+
+
+
 debug:
   debug: True
   pretrain: 1
   prefill: 1
   batch_size: 10
   batch_length: 20
+  device: 'cpu'
+  envs: 1

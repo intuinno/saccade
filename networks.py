@@ -304,6 +304,7 @@ class MultiEncoder(nn.Module):
         mlp_layers,
         mlp_units,
         symlog_inputs,
+        device,
     ):
         super(MultiEncoder, self).__init__()
         excluded = ("is_first", "is_last", "is_terminal", "reward")
@@ -342,6 +343,7 @@ class MultiEncoder(nn.Module):
                 norm,
                 symlog_inputs=symlog_inputs,
                 name="Encoder",
+                device=device,
             )
             self.outdim += mlp_units
 
@@ -375,6 +377,7 @@ class MultiDecoder(nn.Module):
         image_dist,
         vector_dist,
         outscale,
+        device="cuda",
     ):
         super(MultiDecoder, self).__init__()
         excluded = ("is_first", "is_last", "is_terminal")
@@ -415,6 +418,7 @@ class MultiDecoder(nn.Module):
                 vector_dist,
                 outscale=outscale,
                 name="Decoder",
+                device=device,
             )
         self._image_dist = image_dist
 

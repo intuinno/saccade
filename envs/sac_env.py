@@ -66,7 +66,7 @@ class SaccadeEnv(gym.Env):
         if self.render_mode == "human":
             self._render_frame()
 
-        return self.observation
+        return self.observation, self.info
 
     def _reset(self):
         direcs = math.pi * (torch.rand((self.nums_per_image,)) * 2 - 1)
@@ -149,7 +149,7 @@ class SaccadeEnv(gym.Env):
         if self.render_mode == "human":
             self._render_frame()
 
-        return self.observation, reward, done, self.info
+        return self.observation, reward, done, False, self.info
 
     def render(self):
         if self.render_mode == "rgb_array":
@@ -166,14 +166,14 @@ class SaccadeEnv(gym.Env):
         return surf
 
     def _render_frame(self):
-        if self.window is None and self.render_mode == "human":
+        if self.window is None and self.render_mode in ["human", "rgb_array"]:
             pygame.init()
             pygame.display.init()
             self.window = pygame.display.set_mode(
                 (self.window_size, self.window_size), HWSURFACE | DOUBLEBUF | RESIZABLE
             )
             self.draw_screen = self.window.copy()
-        if self.clock is None and self.render_mode == "human":
+        if self.clock is None and self.render_mode in ["human", "rgb_array"]:
             self.clock = pygame.time.Clock()
 
         canvas = pygame.Surface((self.window_size, self.window_size))

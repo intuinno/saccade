@@ -8,7 +8,8 @@ import torchvision
 os.environ["MUJOCO_GL"] = "glfw"
 
 import numpy as np
-import ruamel.yaml as yaml
+from ruamel.yaml import YAML
+
 
 sys.path.append(str(pathlib.Path(__file__).parent))
 
@@ -353,7 +354,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--configs", nargs="+")
     args, remaining = parser.parse_known_args()
-    configs = yaml.safe_load(
+    configs = YAML(typ="safe").load(
         (pathlib.Path(sys.argv[0]).parent / "configs.yaml").read_text()
     )
 

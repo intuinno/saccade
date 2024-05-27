@@ -1,5 +1,6 @@
 datasets/
 logs/
+videos/
 #
 run*
 logdir*

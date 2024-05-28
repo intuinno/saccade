@@ -1,6 +1,7 @@
 import copy
 import torch
 from torch import nn
+import einops
 
 import networks
 import tools
@@ -208,6 +209,40 @@ class WorldModel(nn.Module):
         model = torch.cat([recon[:, :5], openl], 1)
         truth = data["image"][:6]
         model = model
+        error = (model - truth + 1.0) / 2.0
+
+        return torch.cat([truth, model, error], 2)
+
+    def saccade_video_pred(self, data):
+        data = self.preprocess(data)
+        embed = self.encoder(data)
+
+        states, _ = self.dynamics.observe(embed, data["action"], data["is_first"])
+
+        B, T, _ = states["deter"].shape
+        raster_scan_action = torch.eye(16)
+        raster_scan_action = einops.repeat(raster_scan_action, "t c -> b t c", b=B)
+
+        images = []
+        for i in range(T):
+            init = {k: v[:, i] for k, v in states.items()}
+            prior = self.dynamics.imagine_with_action(raster_scan_action, init)
+            patches = self.heads["decoder"](self.dynamics.get_feat(prior))[
+                "central"
+            ].mode()
+            image = einops.rearrange(
+                patches, "b (w1 h1) (w2 h2) -> b (w1 w2) (h1 h2)", w1=4, w2=16
+            )
+            images.append(image)
+
+        model = torch.stack(images, dim=1)
+        model = model[:6]
+
+        # observed image is given until 5 steps
+        truth = data["GT"][:6]
+        truth = einops.repeat(truth, "b t w h -> b t w h 3")
+        model = model[:6]
+        model = einops.repeat(model, "b t w h -> b t w h 3")
         error = (model - truth + 1.0) / 2.0
 
         return torch.cat([truth, model, error], 2)

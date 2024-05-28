@@ -1,6 +1,6 @@
 defaults:
-
-  logdir: null
+  exp_name: 'default'
+  logdir: 'logs'
   traindir: null
   evaldir: null
   offline_traindir: ''
@@ -9,9 +9,9 @@ defaults:
   deterministic_run: False
   steps: 1e6
   parallel: False
-  eval_every: 1e4
+  eval_every: 0
   eval_episode_num: 10
-  log_every: 1e4
+  log_every: 100
   reset_every: 0
   device: 'cuda:0'
   compile: True
@@ -190,8 +190,8 @@ memorymaze:
 
 saccade:
   task: 'saccade_MMNIST'
-  encoder: {mlp_keys: '.*', cnn_keys: '$^'}
-  decoder: {mlp_keys: '.*', cnn_keys: '$^'}
+  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
+  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   envs: 2
     # Exploration
   expl_behavior: 'plan2explore'
@@ -206,7 +206,8 @@ saccade:
   disag_units: 400
   disag_action_cond: True
   actor: {layers: 5, dist: 'onehot', std: 'none'}
-  video_pred_log: False
+  video_pred_log: True
+  exp_name: 'saccade'
   
   
 
@@ -219,4 +220,4 @@ debug:
   batch_size: 10
   batch_length: 20
   device: 'cpu'
-  envs: 1
+  envs: 2

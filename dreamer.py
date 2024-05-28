@@ -1,3 +1,5 @@
+from datetime import datetime
+import pytz
 import argparse
 import functools
 import os
@@ -74,7 +76,7 @@ class Dreamer(nn.Module):
                     self._logger.scalar(name, float(np.mean(values)))
                     self._metrics[name] = []
                 if self._config.video_pred_log:
-                    openl = self._wm.video_pred(next(self._dataset))
+                    openl = self._wm.saccade_video_pred(next(self._dataset))
                     self._logger.video("train_openl", to_np(openl))
                 self._logger.write(fps=True)
 
@@ -219,7 +221,14 @@ def main(config):
     tools.set_seed_everywhere(config.seed)
     if config.deterministic_run:
         tools.enable_deterministic_run()
-    logdir = pathlib.Path(config.logdir).expanduser()
+    # logdir = pathlib.Path(config.logdir).expanduser()
+    rootdir = pathlib.Path(sys.argv[0]).parent
+    tz = pytz.timezone("US/Pacific")
+    now = datetime.now(tz)
+    date_time = now.strftime("%Y%m%d_%H%M%S")
+    exp_name = config.exp_name + "_"
+    exp_name += date_time
+    logdir = rootdir / config.logdir / exp_name
     config.traindir = config.traindir or logdir / "train_eps"
     config.evaldir = config.evaldir or logdir / "eval_eps"
     config.steps //= config.action_repeat
@@ -313,7 +322,7 @@ def main(config):
     # make sure eval will be executed once after config.steps
     while agent._step < config.steps + config.eval_every:
         logger.write()
-        if config.eval_episode_num > 0:
+        if config.eval_every > 0 and config.eval_episode_num > 0:
             print("Start evaluation.")
             eval_policy = functools.partial(agent, training=False)
             tools.simulate(
@@ -336,7 +345,7 @@ def main(config):
             config.traindir,
             logger,
             limit=config.dataset_size,
-            steps=config.eval_every,
+            steps=10000,
             state=state,
         )
         items_to_save = {

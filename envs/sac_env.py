@@ -12,7 +12,12 @@ class SaccadeEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
 
     def __init__(
-        self, images, num_box_per_side=4, seq_len=100, device="cpu", render_mode=None
+        self,
+        images,
+        num_box_per_side=4,
+        seq_len=500,
+        device="cpu",
+        render_mode=None,
     ):
         self.width, self.height = 64, 64  # The size of the mmnist image
         self.window_size = 108
@@ -249,6 +254,8 @@ class SaccadeEnvAdapter:
                 "peripheral": gym.spaces.Box(
                     0, 255, (np.prod(spaces["peripheral"].shape),), dtype=np.uint8
                 ),
+                "GT": gym.spaces.Box(0, 255, (64, 64), dtype=np.uint8),
+                # "loc": spaces.Discrete(16),
                 "is_first": gym.spaces.Box(0, 1, (), dtype=bool),
                 "is_last": gym.spaces.Box(0, 1, (), dtype=bool),
                 "is_terminal": gym.spaces.Box(0, 1, (), dtype=bool),
@@ -262,23 +269,25 @@ class SaccadeEnvAdapter:
         return action_space
 
     def step(self, action):
-        obs, reward, done, info = self._env.step(action)
+        obs, reward, done, truncated, info = self._env.step(action)
         if not self._obs_is_dict:
             obs = {self._obs_key: obs}
         obs = self.flatten_obs(obs)
         obs["is_first"] = False
         obs["is_last"] = done
         obs["is_terminal"] = done
+        obs["GT"] = info["canvas"]
         return obs, reward, done, info
 
     def reset(self):
-        obs = self._env.reset()
+        obs, info = self._env.reset()
         if not self._obs_is_dict:
             obs = {self._obs_key: obs}
         obs = self.flatten_obs(obs)
         obs["is_first"] = True
         obs["is_last"] = False
         obs["is_terminal"] = False
+        obs["GT"] = info["canvas"]
         return obs
 
     def flatten_obs(self, obs):

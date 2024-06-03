@@ -62,8 +62,8 @@ class SaccadeEnv(gym.Env):
         self.clock = None
 
     def reset(self, seed=None):
-        super().reset()
-        # super().reset(seed=seed)
+        # super().reset()
+        super().reset(seed=seed)
         self._reset()
         self.observation, self.info = self._get_obsv()
 

@@ -220,7 +220,7 @@ class WorldModel(nn.Module):
         states, _ = self.dynamics.observe(embed, data["action"], data["is_first"])
 
         B, T, _ = states["deter"].shape
-        raster_scan_action = torch.eye(16)
+        raster_scan_action = torch.eye(16, device=self._config.device)
         raster_scan_action = einops.repeat(raster_scan_action, "t c -> b t c", b=B)
 
         images = []

@@ -76,8 +76,9 @@ class Dreamer(nn.Module):
                     self._logger.scalar(name, float(np.mean(values)))
                     self._metrics[name] = []
                 if self._config.video_pred_log:
-                    openl = self._wm.saccade_video_pred(next(self._dataset))
+                    openl, mse = self._wm.saccade_video_pred(next(self._dataset))
                     self._logger.video("train_openl", to_np(openl))
+                    self._logger.scalar("Sac_MSE", mse)
                 self._logger.write(fps=True)
 
         policy_output, state = self._policy(obs, state, training)

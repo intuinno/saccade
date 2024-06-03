@@ -69,7 +69,7 @@ defaults:
   model_lr: 1e-4
   opt_eps: 1e-8
   grad_clip: 1000
-  dataset_size: 1000000
+  dataset_size: 10000000
   opt: 'adam'
 
   # Behavior.

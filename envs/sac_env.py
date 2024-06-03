@@ -9,36 +9,31 @@ from pygame.locals import *
 
 
 class SaccadeEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 2}
 
     def __init__(
         self,
         images,
-        num_box_per_side=4,
-        seq_len=500,
+        central_size=16,
+        peri_size=8,
+        num_loc_per_side=7,
+        max_speed=2,
+        seq_len=100,
         device="cpu",
         render_mode=None,
     ):
         self.width, self.height = 64, 64  # The size of the mmnist image
         self.window_size = 108
         self.mnist_width, self.mnist_height = 28, 28  # The size of the mnist patch
-        self.num_box_per_side = num_box_per_side
-        self.box_side_length = self.width // self.num_box_per_side
+        self.central_size = central_size
+        self.peri_size = peri_size
+        self.num_loc_per_side = num_loc_per_side
+        self.loc_length = self.width // (num_loc_per_side + 1)
+        self.max_speed = max_speed
 
-        self.peri_size = (
-            self.num_box_per_side,
-            self.num_box_per_side,
-        )  # The size of the pheripheral vision observation
-        self.central_size = (
-            self.box_side_length,
-            self.box_side_length,
-        )  # The size of the central vision observation
-        self.loc_size = (
-            self.num_box_per_side**2
-        )  # The apction space size as the location coordinate
         self.nums_per_image = 2
 
-        self.lims = (x_lim, y_lim) = (
+        self.lims = (
             self.width - self.mnist_width,
             self.height - self.mnist_height,
         )
@@ -50,12 +45,16 @@ class SaccadeEnv(gym.Env):
 
         self.observation_space = spaces.Dict(
             {
-                "central": spaces.Box(0, 255, shape=self.central_size, dtype=np.uint8),
-                "peripheral": spaces.Box(0, 255, shape=self.peri_size, dtype=np.uint8),
-                # "loc": spaces.Discrete(self.loc_size),
+                "central": spaces.Box(
+                    0, 255, shape=(self.central_size, self.central_size), dtype=np.uint8
+                ),
+                "peripheral": spaces.Box(
+                    0, 255, shape=(self.peri_size, self.peri_size), dtype=np.uint8
+                ),
+                "loc": spaces.Discrete(self.num_loc_per_side**2),
             }
         )
-        self.action_space = spaces.Discrete(self.loc_size)
+        self.action_space = spaces.Discrete(self.num_loc_per_side**2)
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -63,11 +62,11 @@ class SaccadeEnv(gym.Env):
         self.clock = None
 
     def reset(self, seed=None):
-        # super().reset(seed=seed)
+        super().reset(seed=seed)
         self._reset()
         self.observation, self.info = self._get_obsv()
 
-        if self.render_mode == "human":
+        if self.render_mode in ["human", "rgb_array"]:
             self._render_frame()
 
         return self.observation, self.info
@@ -76,11 +75,11 @@ class SaccadeEnv(gym.Env):
         direcs = math.pi * (torch.rand((self.nums_per_image,)) * 2 - 1)
         indexes = np.random.randint(self.num_images, size=(self.nums_per_image))
         self.patches = torch.tensor(self.images[indexes])
-        speeds = np.random.randint(1, 5, size=(self.nums_per_image,))
+        speeds = np.random.randint(0, self.max_speed, size=(self.nums_per_image,))
         self.velocs = torch.tensor(
             [(s * torch.cos(d), s * torch.sin(d)) for d, s in zip(direcs, speeds)]
         )
-        self.loc = torch.randint(self.loc_size, (1,))[0]
+        self.loc = torch.randint(self.num_loc_per_side**2, (1,))[0]
         self.positions = torch.mul(
             torch.rand(
                 (
@@ -99,18 +98,18 @@ class SaccadeEnv(gym.Env):
         canvas = torch.where(canvas > 255.0, 255.0, canvas)
         self.canvas = canvas
 
-        rearranged_canvas = einops.rearrange(
-            canvas,
-            "(w1 w2) (h1 h2) -> (w1 h1) w2 h2",
-            w1=self.num_box_per_side,
-            h1=self.num_box_per_side,
-        )
+        x, y = self._get_loc_coord()
 
-        self.central_vision = rearranged_canvas[self.loc]
-        # self.central_vision = einops.rearrange(central, "1 w h -> w h")
+        self.central_vision = canvas[
+            x : x + self.central_size, y : y + self.central_size
+        ]
 
         self.peri_vision = einops.reduce(
-            rearranged_canvas, "(l1 l2) w h -> l1 l2", "mean", l1=self.num_box_per_side
+            canvas,
+            "(w1 w2) (h1 h2) -> w1 h1",
+            "mean",
+            w1=self.peri_size,
+            h1=self.peri_size,
         )
         observation = {
             "central": self.central_vision,
@@ -119,6 +118,12 @@ class SaccadeEnv(gym.Env):
         }
         info = {"canvas": self.canvas, "loc": self.loc}
         return observation, info
+
+    def _get_loc_coord(self):
+        x, y = self.loc // self.num_loc_per_side, self.loc % self.num_loc_per_side
+        x *= self.loc_length
+        y *= self.loc_length
+        return x, y
 
     def _build_canvas(self, patch, pos):
         x, y = pos.to(dtype=torch.int)
@@ -189,8 +194,8 @@ class SaccadeEnv(gym.Env):
         surf = self.get_surface(peri)
         # self.draw_screen.blit(surf, (30 + self.box_side_length, 72))
         self.draw_screen.blit(
-            pygame.transform.scale(surf, (self.box_side_length, self.box_side_length)),
-            (30 + self.box_side_length, 72),
+            pygame.transform.scale(surf, (self.peri_size, self.peri_size)),
+            (30 + self.central_size, 72),
         )
 
         central = self.central_vision.numpy()
@@ -198,12 +203,11 @@ class SaccadeEnv(gym.Env):
         self.draw_screen.blit(surf, (10, 72))
 
         # Draw red line around loc
-        top = self.loc // self.num_box_per_side * self.box_side_length
-        left = self.loc % self.num_box_per_side * self.box_side_length
+        top, left = self._get_loc_coord()
         pygame.draw.rect(
             self.draw_screen,
             (255, 0, 0),
-            pygame.Rect(left, top, self.box_side_length, self.box_side_length),
+            pygame.Rect(left, top, self.central_size, self.central_size),
             width=1,
         )
 

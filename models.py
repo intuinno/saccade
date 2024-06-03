@@ -37,6 +37,7 @@ class WorldModel(nn.Module):
         self.encoder = networks.MultiEncoder(
             shapes, device=config.device, **config.encoder
         )
+        self.act_space = act_space
         self.embed_size = self.encoder.outdim
         self.dynamics = networks.RSSM(
             config.dyn_stoch,
@@ -220,7 +221,13 @@ class WorldModel(nn.Module):
         states, _ = self.dynamics.observe(embed, data["action"], data["is_first"])
 
         B, T, _ = states["deter"].shape
-        raster_scan_action = torch.eye(16)
+        num_actions = self.act_space.shape[0]
+        raster_scan_action = torch.zeros((16, num_actions), device=self._config.device)
+        raster_timing = 0
+        for i in (0, 2, 4, 6):
+            for j in (0, 2, 4, 6):
+                raster_scan_action[raster_timing, i * 7 + j] = 1
+
         raster_scan_action = einops.repeat(raster_scan_action, "t c -> b t c", b=B)
 
         images = []
@@ -236,6 +243,9 @@ class WorldModel(nn.Module):
             images.append(image)
 
         model = torch.stack(images, dim=1)
+        mse = (model - data["GT"]) ** 2
+        mse = mse.mean()
+
         model = model[:6]
 
         # observed image is given until 5 steps
@@ -245,7 +255,7 @@ class WorldModel(nn.Module):
         model = einops.repeat(model, "b t w h -> b t w h 3")
         error = (model - truth + 1.0) / 2.0
 
-        return torch.cat([truth, model, error], 2)
+        return torch.cat([truth, model, error], 2), to_np(mse)
 
 
 class ImagBehavior(nn.Module):

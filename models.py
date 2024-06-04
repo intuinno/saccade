@@ -255,7 +255,25 @@ class WorldModel(nn.Module):
         model = einops.repeat(model, "b t w h -> b t w h 3")
         error = (model - truth + 1.0) / 2.0
 
+        B, T, _, _, _ = truth.shape
+        mask = torch.zeros((B, T, 64, 64), device=self._config.device)
+        actions = torch.argmax(data["action"], 2)
+
+        for b in range(B):
+            for t in range(T):
+                mask[b, t, :, :] = self.mask_action(actions[b, t])
+
+        mask *= 255
+        truth[:, :, :, :, 0] = mask
+
         return torch.cat([truth, model, error], 2), to_np(mse)
+
+    def mask_action(self, index):
+        mask = torch.zeros((64, 64), device=self._config.device)
+        top = index // 7 * 8
+        left = index % 7 * 8
+        mask[top : top + 16, left : left + 16] = 1
+        return mask
 
 
 class ImagBehavior(nn.Module):

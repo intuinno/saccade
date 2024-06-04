@@ -6,6 +6,9 @@ import math
 import pygame
 import einops
 from pygame.locals import *
+import torchvision
+
+torch._dynamo.config.capture_func_transforms = True
 
 
 class SaccadeEnv(gym.Env):
@@ -13,7 +16,6 @@ class SaccadeEnv(gym.Env):
 
     def __init__(
         self,
-        images,
         central_size=16,
         peri_size=8,
         num_loc_per_side=7,
@@ -21,6 +23,7 @@ class SaccadeEnv(gym.Env):
         seq_len=100,
         device="cpu",
         render_mode=None,
+        num_environment=10,
     ):
         self.width, self.height = 64, 64  # The size of the mmnist image
         self.window_size = 108
@@ -30,17 +33,20 @@ class SaccadeEnv(gym.Env):
         self.num_loc_per_side = num_loc_per_side
         self.loc_length = self.width // (num_loc_per_side + 1)
         self.max_speed = max_speed
+        self.num_env = num_environment
 
         self.nums_per_image = 2
+
+        mnist = torchvision.datasets.MNIST("datasets", download=True)
+        self.mnist = torch.tensor(mnist.data.numpy(), device=device)
+        self.num_patches = mnist.shape[0]
 
         self.lims = (
             self.width - self.mnist_width,
             self.height - self.mnist_height,
         )
         self.lims = torch.tensor(self.lims)
-        self.images = images
         self.device = device
-        self.num_images = len(images)
         self.seq_len = seq_len
 
         self.observation_space = spaces.Dict(

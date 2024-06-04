@@ -8,7 +8,7 @@ defaults:
   seed: 0
   deterministic_run: False
   steps: 1e6
-  parallel: False
+  parallel: True
   eval_every: 0
   eval_episode_num: 10
   log_every: 10000
@@ -192,7 +192,7 @@ sac-004-rev2:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 2
+  envs: 64
   # Environment
   num_loc_per_side: 4
     # Exploration
@@ -215,7 +215,7 @@ sac-004-rev3:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 2
+  envs: 64
   # Environment
   num_loc_per_side: 7
     # Exploration
@@ -246,3 +246,4 @@ debug:
   batch_length: 20
   device: 'cpu'
   envs: 2
+  parallel: False

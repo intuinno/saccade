@@ -224,9 +224,20 @@ class WorldModel(nn.Module):
         num_actions = self.act_space.shape[0]
         raster_scan_action = torch.zeros((16, num_actions), device=self._config.device)
         raster_timing = 0
-        for i in (0, 2, 4, 6):
-            for j in (0, 2, 4, 6):
-                raster_scan_action[raster_timing, i * 7 + j] = 1
+
+        if self._config.num_loc_per_side == 4:
+            raster = (0, 1, 2, 3)
+        elif self._config.num_loc_per_side == 7:
+            raster = (0, 2, 4, 6)
+        else:
+            raise NotImplementedError
+
+        for i in raster:
+            for j in raster:
+                raster_scan_action[
+                    raster_timing, i * self._config.num_loc_per_side + j
+                ] = 1
+                raster_timing += 1
 
         raster_scan_action = einops.repeat(raster_scan_action, "t c -> b t c", b=B)
 

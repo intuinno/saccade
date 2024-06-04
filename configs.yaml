@@ -188,11 +188,13 @@ memorymaze:
   imag_gradient: 'reinforce'
   task: 'memorymaze_9x9'
 
-sac-004:
+sac-004-rev2:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   envs: 2
+  # Environment
+  num_loc_per_side: 4
     # Exploration
   expl_behavior: 'plan2explore'
   expl_until: 10000000000000000
@@ -207,7 +209,30 @@ sac-004:
   disag_action_cond: True
   actor: {layers: 5, dist: 'onehot', std: 'none'}
   video_pred_log: True
-  exp_name: 'sac-004'
+  exp_name: 'sac-004-rev2'
+
+sac-004-rev3:
+  task: 'saccade_MMNIST'
+  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
+  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
+  envs: 2
+  # Environment
+  num_loc_per_side: 7
+    # Exploration
+  expl_behavior: 'plan2explore'
+  expl_until: 10000000000000000
+  expl_extr_scale: 0.0
+  expl_intr_scale: 1.0
+  disag_target: 'stoch'
+  disag_log: True
+  disag_models: 10
+  disag_offset: 1
+  disag_layers: 4
+  disag_units: 400
+  disag_action_cond: True
+  actor: {layers: 5, dist: 'onehot', std: 'none'}
+  video_pred_log: True
+  exp_name: 'sac-004-rev2'
   
   
 

@@ -9,7 +9,7 @@ from pygame.locals import *
 
 
 class SaccadeEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 2}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 5}
 
     def __init__(
         self,

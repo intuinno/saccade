@@ -19,7 +19,7 @@
       "console": "integratedTerminal",
       "justMyCode": true, 
       "args": [
-          "--configs", "defaults",  "sac-004-rev3", "debug",
+          "--configs", "defaults",  "sac-004-rev2", "debug",
           // "--logdir", "./logs/debug"
           // "--debug", "True",
       ],

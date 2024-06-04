@@ -244,7 +244,7 @@ class WorldModel(nn.Module):
         images = []
         for i in range(T):
             init = {k: v[:, i] for k, v in states.items()}
-            prior = self.dynamics.imagine_with_action(raster_scan_action, init)
+            prior = self.dynamics.scan_with_action(raster_scan_action, init)
             patches = self.heads["decoder"](self.dynamics.get_feat(prior))[
                 "central"
             ].mode()

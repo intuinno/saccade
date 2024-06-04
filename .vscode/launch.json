@@ -1,0 +1,75 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python Debugger: Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal"
+    }, 
+    {
+      "name": "mmnist",
+      "type": "debugpy", 
+      "request": "launch", 
+      "program": "${workspaceFolder}/dreamer.py",
+      "console": "integratedTerminal",
+      "justMyCode": true, 
+      "args": [
+          "--configs", "defaults",  "saccade", "debug",
+          // "--logdir", "./logs/debug"
+          // "--debug", "True",
+      ],
+      "env": {
+          // "XLA_PYTHON_CLIENT_MEM_FRACTION": ".30",
+          // "XLA_PYTHON_CLIENT_ALLOCATOR": "platform",
+      }
+      // "environment": [
+      //     {"name": "XLA_PYTHON_CLIENT_MEM_FRACTION", "value": ".10"}
+      // ],
+  },
+  {
+    "name": "test mmnist",
+    "type": "debugpy", 
+    "request": "launch", 
+    "program": "${workspaceFolder}/envs/test_sac_env.py",
+    "console": "integratedTerminal",
+    "justMyCode": true, 
+    "args": [
+        // "--configs", "defaults",  "saccade", "debug",
+        // "--logdir", "./logs/debug"
+        // "--debug", "True",
+    ],
+    "env": {
+        // "XLA_PYTHON_CLIENT_MEM_FRACTION": ".30",
+        // "XLA_PYTHON_CLIENT_ALLOCATOR": "platform",
+    }
+    // "environment": [
+    //     {"name": "XLA_PYTHON_CLIENT_MEM_FRACTION", "value": ".10"}
+    // ],
+},
+  {
+    "name": "crafter",
+    "type": "debugpy", 
+    "request": "launch", 
+    "program": "${workspaceFolder}/dreamer.py",
+    "console": "integratedTerminal",
+    "justMyCode": true, 
+    "args": [
+        "--configs", "defaults",  "crafter", "debug",
+        "--logdir", "./logs/crafter"
+        // "--debug", "True",
+    ],
+    "env": {
+        // "XLA_PYTHON_CLIENT_MEM_FRACTION": ".30",
+        // "XLA_PYTHON_CLIENT_ALLOCATOR": "platform",
+    }
+    // "environment": [
+    //     {"name": "XLA_PYTHON_CLIENT_MEM_FRACTION", "value": ".10"}
+    // ],
+},
+  ]
+}

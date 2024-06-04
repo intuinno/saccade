@@ -244,7 +244,7 @@ class WorldModel(nn.Module):
         images = []
         for i in range(T):
             init = {k: v[:, i] for k, v in states.items()}
-            prior = self.dynamics.imagine_with_action(raster_scan_action, init)
+            prior = self.dynamics.scan_with_action(raster_scan_action, init)
             patches = self.heads["decoder"](self.dynamics.get_feat(prior))[
                 "central"
             ].mode()
@@ -281,8 +281,12 @@ class WorldModel(nn.Module):
 
     def mask_action(self, index):
         mask = torch.zeros((64, 64), device=self._config.device)
-        top = index // 7 * 8
-        left = index % 7 * 8
+        if self._config.num_loc_per_side == 7:
+            top = index // 7 * 8
+            left = index % 7 * 8
+        elif self._config.num_loc_per_side == 4:
+            top = index // 4 * 16
+            left = index % 4 * 16
         mask[top : top + 16, left : left + 16] = 1
         return mask
 

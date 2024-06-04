@@ -142,6 +142,18 @@ class RSSM(nn.Module):
         prior = {k: swap(v) for k, v in prior.items()}
         return post, prior
 
+    def scan_with_action(self, action, state):
+        swap = lambda x: x.permute([1, 0] + list(range(2, len(x.shape))))
+        assert isinstance(state, dict), state
+        action = swap(action)
+        # prior = tools.static_scan(self.img_step, [action], state)
+        prior = [self.img_step(state, a) for a in action]
+        results = {}
+        for k in prior[0]:
+            results[k] = [p[k] for p in prior]
+            results[k] = torch.stack(results[k], dim=1)
+        return results
+
     def imagine_with_action(self, action, state):
         swap = lambda x: x.permute([1, 0] + list(range(2, len(x.shape))))
         assert isinstance(state, dict), state

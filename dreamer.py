@@ -204,7 +204,7 @@ def make_env(config, mode, id):
 
         mnist = torchvision.datasets.MNIST("datasets", download=True)
         images = mnist.data.numpy()[:1000]
-        env = sac_env.SaccadeEnvAdapter(images)
+        env = sac_env.SaccadeEnvAdapter(images, config)
 
         env = wrappers.OneHotAction(env)
 

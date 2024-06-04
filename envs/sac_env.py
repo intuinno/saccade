@@ -31,7 +31,14 @@ class SaccadeEnv(gym.Env):
         self.central_size = central_size
         self.peri_size = peri_size
         self.num_loc_per_side = num_loc_per_side
-        self.loc_length = self.width // (num_loc_per_side + 1)
+
+        if num_loc_per_side == 4:
+            self.loc_length = self.width // (num_loc_per_side)
+        elif num_loc_per_side == 7:
+            self.loc_length = self.width // (num_loc_per_side + 1)
+        else:
+            raise NotImplementedError
+
         self.max_speed = max_speed
         self.num_env = num_environment
 
@@ -201,7 +208,7 @@ class SaccadeEnv(gym.Env):
         surf = self.get_surface(peri)
         # self.draw_screen.blit(surf, (30 + self.box_side_length, 72))
         self.draw_screen.blit(
-            pygame.transform.scale(surf, (self.peri_size, self.peri_size)),
+            pygame.transform.scale(surf, (self.central_size, self.central_size)),
             (30 + self.central_size, 72),
         )
 
@@ -239,8 +246,8 @@ class SaccadeEnv(gym.Env):
 
 
 class SaccadeEnvAdapter:
-    def __init__(self, images):
-        self._env = SaccadeEnv(images)
+    def __init__(self, images, configs):
+        self._env = SaccadeEnv(images, num_loc_per_side=configs.num_loc_per_side)
         self._obs_is_dict = hasattr(self._env.observation_space, "spaces")
 
     def __getattr__(self, name):

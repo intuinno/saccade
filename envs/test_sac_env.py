@@ -1,6 +1,6 @@
 import gym
 from gym.wrappers import RecordVideo
-from sac_env import SaccadeEnv
+from envs.vec_sac_env import SaccadeEnv
 import torchvision
 
 mnist = torchvision.datasets.MNIST("datasets", download=True)

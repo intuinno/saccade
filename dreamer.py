@@ -200,11 +200,11 @@ def make_env(config, mode, id):
         env = minecraft.make_env(task, size=config.size, break_speed=config.break_speed)
         env = wrappers.OneHotAction(env)
     elif suite == "saccade":
-        import envs.sac_env as sac_env
+        import envs.vec_sac_env as vec_sac_env
 
         mnist = torchvision.datasets.MNIST("datasets", download=True)
         images = mnist.data.numpy()[:1000]
-        env = sac_env.SaccadeEnvAdapter(images, config)
+        env = vec_sac_env.SaccadeEnvAdapter(images, config)
 
         env = wrappers.OneHotAction(env)
 

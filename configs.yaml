@@ -23,7 +23,7 @@ defaults:
   task: 'dmc_walker_walk'
   size: [64, 64]
   envs: 1
-  action_repeat: 2
+  action_repeat: 1
   time_limit: 1000
   grayscale: False
   prefill: 2500

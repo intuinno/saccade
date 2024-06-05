@@ -6,6 +6,7 @@ import os
 import pathlib
 import sys
 import torchvision
+from envs.vec_sac_env import VecSaccadeEnvAdapter
 
 os.environ["MUJOCO_GL"] = "glfw"
 
@@ -30,7 +31,7 @@ to_np = lambda x: x.detach().cpu().numpy()
 
 
 class Dreamer(nn.Module):
-    def __init__(self, obs_space, act_space, config, logger, dataset):
+    def __init__(self, obs_space, act_space, config, logger):
         super(Dreamer, self).__init__()
         self._config = config
         self._logger = logger
@@ -139,90 +140,10 @@ class Dreamer(nn.Module):
                 self._metrics[name].append(value)
 
 
-def count_steps(folder):
-    return sum(int(str(n).split("-")[-1][:-4]) - 1 for n in folder.glob("*.npz"))
-
-
-def make_dataset(episodes, config):
-    generator = tools.sample_episodes(episodes, config.batch_length)
-    dataset = tools.from_generator(generator, config.batch_size)
-    return dataset
-
-
-def make_env(config, mode, id):
-    suite, task = config.task.split("_", 1)
-    if suite == "dmc":
-        import envs.dmc as dmc
-
-        env = dmc.DeepMindControl(
-            task, config.action_repeat, config.size, seed=config.seed + id
-        )
-        env = wrappers.NormalizeActions(env)
-    elif suite == "atari":
-        import envs.atari as atari
-
-        env = atari.Atari(
-            task,
-            config.action_repeat,
-            config.size,
-            gray=config.grayscale,
-            noops=config.noops,
-            lives=config.lives,
-            sticky=config.stickey,
-            actions=config.actions,
-            resize=config.resize,
-            seed=config.seed + id,
-        )
-        env = wrappers.OneHotAction(env)
-    elif suite == "dmlab":
-        import envs.dmlab as dmlab
-
-        env = dmlab.DeepMindLabyrinth(
-            task,
-            mode if "train" in mode else "test",
-            config.action_repeat,
-            seed=config.seed + id,
-        )
-        env = wrappers.OneHotAction(env)
-    elif suite == "memorymaze":
-        from envs.memorymaze import MemoryMaze
-
-        env = MemoryMaze(task, seed=config.seed + id)
-        env = wrappers.OneHotAction(env)
-    elif suite == "crafter":
-        import envs.crafter as crafter
-
-        env = crafter.Crafter(task, config.size, seed=config.seed + id)
-        env = wrappers.OneHotAction(env)
-    elif suite == "minecraft":
-        import envs.minecraft as minecraft
-
-        env = minecraft.make_env(task, size=config.size, break_speed=config.break_speed)
-        env = wrappers.OneHotAction(env)
-    elif suite == "saccade":
-        import envs.vec_sac_env as vec_sac_env
-
-        mnist = torchvision.datasets.MNIST("datasets", download=True)
-        images = mnist.data.numpy()[:1000]
-        env = vec_sac_env.SaccadeEnvAdapter(images, config)
-
-        env = wrappers.OneHotAction(env)
-
-    else:
-        raise NotImplementedError(suite)
-    env = wrappers.TimeLimit(env, config.time_limit)
-    env = wrappers.SelectAction(env, key="action")
-    env = wrappers.UUID(env)
-    if suite == "minecraft":
-        env = wrappers.RewardObs(env)
-    return env
-
-
 def main(config):
     tools.set_seed_everywhere(config.seed)
     if config.deterministic_run:
         tools.enable_deterministic_run()
-    # logdir = pathlib.Path(config.logdir).expanduser()
     rootdir = pathlib.Path(sys.argv[0]).parent
     tz = pytz.timezone("US/Pacific")
     now = datetime.now(tz)
@@ -256,62 +177,17 @@ def main(config):
     else:
         directory = config.evaldir
     eval_eps = tools.load_episodes(directory, limit=1)
-    make = lambda mode, id: make_env(config, mode, id)
-    train_envs = [make("train", i) for i in range(config.envs)]
-    eval_envs = [make("eval", i) for i in range(config.envs)]
-    if config.parallel:
-        train_envs = [Parallel(env, "process") for env in train_envs]
-        eval_envs = [Parallel(env, "process") for env in eval_envs]
-    else:
-        train_envs = [Damy(env) for env in train_envs]
-        eval_envs = [Damy(env) for env in eval_envs]
-    acts = train_envs[0].action_space
+    train_envs = VecSaccadeEnvAdapter(config)
+    acts = train_envs.action_space
     print("Action Space", acts)
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
 
-    state = None
-    if not config.offline_traindir:
-        prefill = max(0, config.prefill - count_steps(config.traindir))
-        print(f"Prefill dataset ({prefill} steps).")
-        if hasattr(acts, "discrete"):
-            random_actor = tools.OneHotDist(
-                torch.zeros(config.num_actions).repeat(config.envs, 1)
-            )
-        else:
-            random_actor = torchd.independent.Independent(
-                torchd.uniform.Uniform(
-                    torch.Tensor(acts.low).repeat(config.envs, 1),
-                    torch.Tensor(acts.high).repeat(config.envs, 1),
-                ),
-                1,
-            )
-
-        def random_agent(o, d, s):
-            action = random_actor.sample()
-            logprob = random_actor.log_prob(action)
-            return {"action": action, "logprob": logprob}, None
-
-        state = tools.simulate(
-            random_agent,
-            train_envs,
-            train_eps,
-            config.traindir,
-            logger,
-            limit=config.dataset_size,
-            steps=prefill,
-        )
-        logger.step += prefill * config.action_repeat
-        print(f"Logger: ({logger.step} steps).")
-
     print("Simulate agent.")
-    train_dataset = make_dataset(train_eps, config)
-    eval_dataset = make_dataset(eval_eps, config)
     agent = Dreamer(
-        train_envs[0].observation_space,
-        train_envs[0].action_space,
+        train_envs.observation_space,
+        train_envs.action_space,
         config,
         logger,
-        train_dataset,
     ).to(config.device)
     agent.requires_grad_(requires_grad=False)
     if (logdir / "latest.pt").exists():
@@ -323,21 +199,7 @@ def main(config):
     # make sure eval will be executed once after config.steps
     while agent._step < config.steps + config.eval_every:
         logger.write()
-        if config.eval_every > 0 and config.eval_episode_num > 0:
-            print("Start evaluation.")
-            eval_policy = functools.partial(agent, training=False)
-            tools.simulate(
-                eval_policy,
-                eval_envs,
-                eval_eps,
-                config.evaldir,
-                logger,
-                is_eval=True,
-                episodes=config.eval_episode_num,
-            )
-            if config.video_pred_log:
-                video_pred = agent._wm.video_pred(next(eval_dataset))
-                logger.video("eval_openl", to_np(video_pred))
+
         print("Start training.")
         state = tools.simulate(
             agent,

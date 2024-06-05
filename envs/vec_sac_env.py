@@ -60,7 +60,8 @@ class VecSaccadeEnv(gym.Env):
         self.observation_space = spaces.Dict(
             {
                 "central": spaces.Box(
-                    0, 255, shape=(self.central_size, self.central_size), dtype=np.uint8
+                    0, 255, shape=(self.central_size, self.central_size), 
+                    dtype=np.uint8
                 ),
                 "peripheral": spaces.Box(
                     0, 255, shape=(self.peri_size, self.peri_size), dtype=np.uint8
@@ -297,9 +298,13 @@ class VecSaccadeEnv(gym.Env):
             self.window = None
 
 
-class SaccadeEnvAdapter:
-    def __init__(self, images, configs):
-        self._env = SaccadeEnv(images, num_loc_per_side=configs.num_loc_per_side)
+class VecSaccadeEnvAdapter:   
+    def __init__(self, configs):
+        self._env = VecSaccadeEnv(
+            num_loc_per_side=configs.num_loc_per_side,
+            device=configs.device,
+            num_environment=configs.envs,
+        )
         self._obs_is_dict = hasattr(self._env.observation_space, "spaces")
 
     def __getattr__(self, name):

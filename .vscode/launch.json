@@ -32,6 +32,26 @@
       // ],
   },
   {
+    "name": "test Vec mmnist",
+    "type": "debugpy", 
+    "request": "launch", 
+    "program": "${workspaceFolder}/envs/test_vec_sac_env.py",
+    "console": "integratedTerminal",
+    "justMyCode": true, 
+    "args": [
+        // "--configs", "defaults",  "saccade", "debug",
+        // "--logdir", "./logs/debug"
+        // "--debug", "True",
+    ],
+    "env": {
+        // "XLA_PYTHON_CLIENT_MEM_FRACTION": ".30",
+        // "XLA_PYTHON_CLIENT_ALLOCATOR": "platform",
+    }
+    // "environment": [
+    //     {"name": "XLA_PYTHON_CLIENT_MEM_FRACTION", "value": ".10"}
+    // ],
+},
+  {
     "name": "test mmnist",
     "type": "debugpy", 
     "request": "launch", 

@@ -40,7 +40,7 @@
     "justMyCode": true, 
     "args": [
         "--configs",  "sac-006", "debug",
-        "--device", "cuda:0",
+        "--device", "cuda:1",
         // "--logdir", "./logs/debug"
         // "--debug", "True",
     ],

@@ -725,7 +725,7 @@ class ACBehavior(nn.Module):
             metrics.update(tools.tensorstats(batch['action'], "batch_action"))
         metrics["actor_entropy"] = to_np(torch.mean(actor_ent))
         metrics.update(self._actor_opt(actor_loss, self.actor.parameters()))
-        metrics.update(self._value_opt(value_loss, self.value.parameters()))
+        metrics.update(self._value_opt(value_loss, self.value.parameters(), retain_graph=False))
         return metrics
 
 

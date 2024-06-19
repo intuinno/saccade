@@ -111,6 +111,7 @@ if __name__ == "__main__":
     print(f"========== Using {configs.device} device ===================")
 
     # Main Loop
+    step = 0
     for i in tqdm(range(int(num_epochs))):
         _ = envs.reset()
         init_state = agent.get_init_wm_state()
@@ -137,13 +138,14 @@ if __name__ == "__main__":
                 batch['init_state'] = init_state
                 agent.saccade_train(buffer)
 
-        if i% 100 == 0:
+        if i% 2 == 10:
             openl, mse = agent.saccade_evaluation(batch)
             logger.video("train_openl", to_np(openl))
             logger.scalar("Sac_MSE", mse)
 
-        if i % 100 == 0:
-            logger.write()
+        logger.step =  (i+1)*configs.envs*configs.num_steps
+        logger.write()
+        
         
         if i % 100 == 0:        
             items_to_save = {

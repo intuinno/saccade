@@ -15,7 +15,7 @@ defaults:
 
   # Environment
   size: [64, 64]
-  envs: 512
+  envs: 128
   num_steps: 64
   reward_EMA: True
 

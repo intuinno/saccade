@@ -76,6 +76,7 @@ class VecSaccadeEnv(gym.Env):
         self.window = None
         self.clock = None
         self._vmap_build_canvas = torch.vmap(self._build_canvas)
+        self.step = torch.compile(self.step)
 
     def reset(self, seed=None):
         # super().reset()
@@ -300,11 +301,13 @@ class VecSaccadeEnv(gym.Env):
 
 class VecSaccadeEnvAdapter:   
     def __init__(self, configs):
-        self._env = VecSaccadeEnv(
+        env = VecSaccadeEnv(
             num_loc_per_side=configs.num_loc_per_side,
             device=configs.device,
             num_environment=configs.envs,
         )
+        self.num_envs = configs.envs
+        self._env = env
         self._obs_is_dict = hasattr(self._env.observation_space, "spaces")
 
     def __getattr__(self, name):
@@ -344,13 +347,15 @@ class VecSaccadeEnvAdapter:
         return action_space
 
     def step(self, action):
+        if len(action.shape) > 1:
+            action = torch.argmax(action,1)
         obs, reward, done, truncated, info = self._env.step(action)
         if not self._obs_is_dict:
             obs = {self._obs_key: obs}
         obs = self.flatten_obs(obs)
-        obs["is_first"] = False
-        obs["is_last"] = done
-        obs["is_terminal"] = done
+        obs["is_first"] = torch.ones((self.num_envs,))
+        obs["is_last"] = torch.zeros((self.num_envs,))
+        obs["is_terminal"] = torch.zeros((self.num_envs))
         obs["GT"] = info["canvas"]
         return obs, reward, done, info
 
@@ -366,5 +371,5 @@ class VecSaccadeEnvAdapter:
         return obs
 
     def flatten_obs(self, obs):
-        obs = {k: torch.flatten(v) for k, v in obs.items()}
+        obs = {k: torch.flatten(v, start_dim=1) for k, v in obs.items()}
         return obs

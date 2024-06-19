@@ -120,6 +120,7 @@ class RSSM(nn.Module):
         elif self._initial == "learned":
             state["deter"] = torch.tanh(self.W).repeat(batch_size, 1)
             state["stoch"] = self.get_stoch(state["deter"])
+            state["feat"] = self.get_feat(state)
             return state
         else:
             raise NotImplementedError(self._initial)

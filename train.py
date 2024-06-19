@@ -5,10 +5,39 @@ import torch
 import pathlib
 import sys
 from tqdm import tqdm
+from envs.vec_sac_env import VecSaccadeEnvAdapter
+from saccade_agent import SaccadeAgent
 
 import tools
 from datetime import datetime
 import pytz
+
+to_np = lambda x: x.detach().cpu().numpy()
+
+# torch.autograd.set_detect_anomaly(True)
+
+def append_buffer(buffer, item):
+    for key, val in item.items():
+        if key not in buffer:
+            if isinstance(val,dict):
+                buffer[key] = {}
+            else:
+                buffer[key] = []
+        if isinstance(val, dict):
+            append_buffer(buffer[key], val)
+        else:
+            buffer[key].append(val)
+
+def build_batch(buffer):
+    for key, val in buffer.items():
+        if isinstance(val, dict):
+            buffer[key] = build_batch(buffer[key])
+        else:
+            buffer[key] = torch.stack(buffer[key])
+    return buffer
+            
+        
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -17,13 +46,21 @@ if __name__ == "__main__":
     args, remaining = parser.parse_known_args()
     rootdir = pathlib.Path(sys.argv[0]).parent
     yaml = YAML(typ='safe')
-    configs = yaml.load(
-        rootdir / "configs.yml"
-    ).read_text()
+    configs = yaml.load((
+       rootdir / "configs.yaml"
+    ).read_text())
 
+    def recursive_update(base, update):
+        for key, value in update.items():
+            if isinstance(value, dict) and key in base:
+                recursive_update(base[key], value)
+            else:
+                base[key] = value
+           
+    name_list = ["defaults", *args.configs] if args.configs else ["defaults"]
     defaults = {}
-    for name in args.configs:
-        defaults.update(configs[name])
+    for name in name_list:
+        recursive_update(defaults, configs[name])     
     parser = argparse.ArgumentParser()
     for key, value in sorted(defaults.items(), key=lambda x: x[0]):
         arg_type = tools.args_type(value)
@@ -32,6 +69,8 @@ if __name__ == "__main__":
 
     exp_name = configs.exp_name + "_"
     tools.set_seed_everywhere(configs.seed)
+    if configs.deterministic_run:
+        tools.enable_deterministic_run()
 
     tz = pytz.timezone("US/Pacific")
     now = datetime.now(tz)
@@ -39,86 +78,83 @@ if __name__ == "__main__":
     exp_name += date_time
 
     # Creating model dir with experiment name.
-    exp_logdir = rootdir / configs.logdir / configs.dataset / exp_name
+    exp_logdir = rootdir / configs.logdir / exp_name
     print("Logdir", exp_logdir)
     exp_logdir.mkdir(parents=True, exist_ok=True)
 
-    # Dumping config.
-    with open(exp_logdir / "config.yml", "w") as f:
-        yaml.dump(vars(configs), f, default_flow_style=False)
 
 
-    # Load dataset.
-    train_dataset, val_dataset = load_dataset(configs)
-    train_dataloader = DataLoader(
-        train_dataset, batch_size=configs.batch_size, shuffle=True
-    )
-    val_dataloader = DataLoader(val_dataset, batch_size=8, shuffle=True)
-
-    # Build model
-    model = L2HWM(configs).to(configs.device)
-
-    print(f"========== Using {configs.device} device ===================")
-
-    # Load model if args.load_model is not none
-    if args.load_model is not None:
-        model_path = pathlib.Path(args.load_model).expanduser()
-        print(f"========== Loading saved model from {model_path} ===========")
-        checkpoint = torch.load(model_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
-
+    # Setting up environments
+    envs = VecSaccadeEnvAdapter(configs)
+    acts = envs.action_space
+    print("Action Space", acts)
+    configs.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
+    num_epochs = configs.total_steps // configs.envs // configs.num_steps
+    configs.use_amp = True if configs.precision == 16 else False
+    
     # Build logger
     logger = tools.Logger(exp_logdir, 0)
     metrics = {}
 
-    for epoch in range(configs.num_epochs):
-        # Write evaluation summary
-        print(f"======== Epoch {epoch} / {configs.num_epochs} ==========")
-        now = datetime.now(tz)
-        current_time = now.strftime("%H:%M:%S")
-        print("Current Time =", current_time)
+    # Dumping config.
+    yaml.default_flow_style = False
+    with open(exp_logdir / "config.yml", "w") as f:
+        yaml.dump(vars(configs), f)
+        
+    agent = SaccadeAgent(
+        envs.observation_space,
+        envs.action_space,
+        configs,
+        logger,
+    ).to(configs.device)
 
-        logger.step = epoch
-        if epoch % configs.eval_every == 0:
-            print(f"Evaluating ... ")
-            recon_loss_list = []
-            for i, x in enumerate(tqdm(val_dataloader)):
-                openl, recon_loss = model.video_pred(x.to(configs.device))
-                if i == 0:
-                    logger.video("eval_openl", openl)
-                recon_loss_list.append(recon_loss)
-            recon_loss_mean = np.mean(recon_loss_list)
-            logger.scalar("eval_video_nll", recon_loss_mean)
+    print(f"========== Using {configs.device} device ===================")
 
-        print(f"Training ...")
-        for i, x in enumerate(tqdm(train_dataloader)):
-            x = x.to(configs.device)
-            met = model.local_train(x)
-            for name, values in met.items():
-                if not name in metrics.keys():
-                    metrics[name] = [values]
-                else:
-                    metrics[name].append(values)
+    # Main Loop
+    for i in tqdm(range(int(num_epochs))):
+        _ = envs.reset()
+        init_state = agent.get_init_wm_state()
+        buffer = {}
 
-        # Write training summary
-        for name, values in metrics.items():
-            logger.scalar(name, float(np.mean(values)))
-            metrics[name] = []
-        if epoch % configs.train_gif_every == 0:
-            openl, recon_loss = model.video_pred(x)
-            logger.video("train_openl", openl)
-            logger.write(fps=True)
+        state = init_state
+        with tools.RequiresGrad(agent):
+            with torch.cuda.amp.autocast(configs.use_amp):
+                for j in range(configs.num_steps):
+                    action, logprob, actor_ent = agent.get_action(state)
+                    obs, _, _, _ = envs.step(action)
+                    post, prior = agent.estimate_state(state, action, obs)
+                    state = post
+                    append_buffer(buffer, {
+                        "post": post,
+                        "prior": prior,
+                        "action": action,
+                        "logprob": logprob,
+                        "actor_ent": actor_ent,
+                        "obs": obs,
+                    })
+                batch = build_batch(buffer)
+                batch['reward'] = agent.calculate_reward(batch, method='prediction')    
+                batch['init_state'] = init_state
+                agent.saccade_train(buffer)
 
-        checkpoint = {
-            "epoch": epoch + 1,
-            "model_state_dict": model.state_dict(),
-            # 'logger': logger,
+        if i% 100 == 0:
+            openl, mse = agent.saccade_evaluation(batch)
+            logger.video("train_openl", to_np(openl))
+            logger.scalar("Sac_MSE", mse)
+
+        if i % 100 == 0:
+            logger.write()
+        
+        if i % 100 == 0:        
+            items_to_save = {
+            "agent_state_dict": agent.state_dict(),
+            "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
         }
-        # Save Check point
-        if epoch % configs.save_model_every == 0:
-            torch.save(checkpoint, exp_logdir / "latest_checkpoint.pt")
-
-        if epoch % configs.backup_model_every == 0:
-            torch.save(checkpoint, exp_logdir / f"state_{epoch}.pt")
+            torch.save(items_to_save, exp_logdir / "latest.pt")
 
     print("Training complete.")
+    try:
+        envs.close()
+    except Exception:
+        print("Env close failure")
+        pass

@@ -99,3 +99,4 @@ class SaccadeAgent(nn.Module):
                 self._metrics[name] = [value]
             else:
                 self._metrics[name].append(value)
+

@@ -4,14 +4,15 @@ defaults:
   seed: 0
   deterministic_run: False
   total_steps: 1e9
-  eval_every: 0
+  eval_every: 10
   eval_episode_num: 10
-  log_every: 10000
+  log_every: 1
   device: 'cuda:0'
   compile: True
   precision: 32
   debug: False
   video_pred_log: True
+  backup_model_every: 100
 
   # Environment
   size: [64, 64]

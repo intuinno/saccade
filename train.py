@@ -138,16 +138,22 @@ if __name__ == "__main__":
                 batch['init_state'] = init_state
                 agent.saccade_train(buffer)
 
-        if i% 2 == 10:
+        if i % configs.eval_every == 0:
             openl, mse = agent.saccade_evaluation(batch)
             logger.video("train_openl", to_np(openl))
             logger.scalar("Sac_MSE", mse)
 
         logger.step =  (i+1)*configs.envs*configs.num_steps
-        logger.write()
+
+        if i % configs.log_every == 0:
+            for name, values in agent._metrics.items():
+                logger.scalar(name, float(np.mean(values)))
+                agent._metrics[name] = []
+
+        logger.write(fps=True)
         
         
-        if i % 100 == 0:        
+        if i % configs.backup_model_every == 0:        
             items_to_save = {
             "agent_state_dict": agent.state_dict(),
             "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),

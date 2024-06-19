@@ -74,11 +74,10 @@ defaults:
   disag_units: 400
   disag_action_cond: False
 
-sac-005:
+sac-006:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 4000
     # Exploration
   expl_behavior: 'plan2explore'
   expl_until: 10000000000000000
@@ -91,9 +90,9 @@ sac-005:
   disag_layers: 4
   disag_units: 400
   disag_action_cond: True
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
+  actor: {layers: 3, dist: 'onehot', std: 'none'}
   video_pred_log: True
-  exp_name: 'sac-005'
+  exp_name: 'sac-006'
   # Environment
   num_loc_per_side: 4
   

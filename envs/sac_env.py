@@ -86,8 +86,8 @@ class SaccadeEnv(gym.Env):
         speeds = np.random.randint(0, self.max_speed, size=(self.nums_per_image,))
         self.velocs = torch.tensor(
             [(s * torch.cos(d), s * torch.sin(d)) for d, s in zip(direcs, speeds)]
-        )
-        self.loc = torch.randint(self.num_loc_per_side**2, (1,))[0]
+        ).device(self.device)
+        self.loc = torch.randint(self.num_loc_per_side**2, (1,))[0].device(self.device)
         self.positions = torch.mul(
             torch.rand(
                 (
@@ -96,7 +96,7 @@ class SaccadeEnv(gym.Env):
                 )
             ),
             self.lims,
-        )
+        ).to(self.device)
         self.step_count = 0
 
     def _get_obsv(self):

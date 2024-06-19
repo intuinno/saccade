@@ -24,6 +24,7 @@ class VecSaccadeEnv(gym.Env):
         device="cpu",
         render_mode=None,
         num_environment=10,
+        compile=True,
     ):
         self.width, self.height = 64, 64  # The size of the mmnist image
         self.window_width = 300
@@ -53,7 +54,7 @@ class VecSaccadeEnv(gym.Env):
             self.width - self.mnist_width,
             self.height - self.mnist_height,
         )
-        self.lims = torch.tensor(self.lims)
+        self.lims = torch.tensor(self.lims).to(device)
         self.device = device
         self.seq_len = seq_len
 
@@ -76,7 +77,8 @@ class VecSaccadeEnv(gym.Env):
         self.window = None
         self.clock = None
         self._vmap_build_canvas = torch.vmap(self._build_canvas)
-        self.step = torch.compile(self.step)
+        if compile:
+            self.step = torch.compile(self.step)
 
     def reset(self, seed=None):
         # super().reset()
@@ -119,21 +121,22 @@ class VecSaccadeEnv(gym.Env):
             (speeds * torch.cos(direcs), speeds * torch.sin(direcs)),
             dim=1,
         )
-        self.loc = torch.randint(self.num_loc_per_side**2, (self.num_env,))
+        self.loc = torch.randint(self.num_loc_per_side**2, (self.num_env,), device=self.device)
         self.positions = torch.mul(
             torch.rand(
                 (
                     self.num_env,
                     self.nums_per_image,
                     2,
-                )
+                ), 
+                device=self.device
             ),
             self.lims,
         )
         self.step_count = 0
 
     def _get_obsv(self):
-        canvas = torch.zeros(self.num_env, self.width, self.height)
+        canvas = torch.zeros(self.num_env, self.width, self.height).to(self.device)
 
         for i in range(self.nums_per_image):
             buf = [
@@ -188,7 +191,7 @@ class VecSaccadeEnv(gym.Env):
         x, y = pos.to(dtype=torch.int)
         x = torch.clamp(x, min=0, max=self.lims[0])
         y = torch.clamp(y, min=0, max=self.lims[1])
-        canvas = torch.zeros((self.width, self.height), dtype=torch.uint8)
+        canvas = torch.zeros((self.width, self.height), dtype=torch.uint8).to(self.device)
         canvas[x : x + self.mnist_width, y : y + self.mnist_height] = patch
         return canvas
 

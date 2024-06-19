@@ -39,8 +39,8 @@
     "console": "integratedTerminal",
     "justMyCode": true, 
     "args": [
-        "--configs",  "sac-005", "debug",
-        "--device", "cpu",
+        "--configs",  "sac-006",
+        // "--device", "cpu",
         // "--logdir", "./logs/debug"
         // "--debug", "True",
     ],

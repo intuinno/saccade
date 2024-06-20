@@ -18,7 +18,13 @@ class SaccadeAgent(nn.Module):
         self._wm = models.WorldModel(obs_space, act_space, self._step, config).to(
             config.device
         )
-        self.behavior = models.ACBehavior(config).to(config.device)
+        if config.behavior == 'ac':
+            self.behavior = models.ACBehavior(config).to(config.device)
+        elif config.behavior == 'random':
+            self.behavior = models.SaccadeRandomBehavior(config, act_space).to(config.device)
+        else:
+            raise NotImplementedError(config.behavior)
+
         if (
             config.compile and os.name != "nt"
         ):  # compilation is not supported on windows

@@ -1,6 +1,7 @@
 import copy
 import torch
 from torch import nn
+from torch import distributions as torchd
 import einops
 
 import networks
@@ -667,8 +668,6 @@ class ACBehavior(nn.Module):
             # register ema_vals to nn.Module for enabling torch.save and torch.load
             self.register_buffer("ema_vals", torch.zeros((2,)).to(self._config.device))
             self.reward_ema = RewardEMA(device=self._config.device)
-    
-    
 
     def saccade_train(
         self,
@@ -729,126 +728,6 @@ class ACBehavior(nn.Module):
         return metrics
 
 
-    def _train(
-        self,
-        start,
-        objective,
-    ):
-        self._update_slow_target()
-        metrics = {}
-
-        with tools.RequiresGrad(self.actor):
-            with torch.cuda.amp.autocast(self._use_amp):
-                imag_feat, imag_state, imag_action = self._imagine(
-                    start, self.actor, self._config.imag_horizon
-                )
-                reward = objective(imag_feat, imag_state, imag_action)
-                actor_ent = self.actor(imag_feat).entropy()
-                state_ent = self._world_model.dynamics.get_dist(imag_state).entropy()
-                # this target is not scaled by ema or sym_log.
-                target, weights, base = self._compute_target(
-                    imag_feat, imag_state, reward
-                )
-                actor_loss, mets = self._compute_actor_loss(
-                    imag_feat,
-                    imag_action,
-                    target,
-                    weights,
-                    base,
-                )
-                actor_loss -= self._config.actor["entropy"] * actor_ent[:-1, ..., None]
-                actor_loss = torch.mean(actor_loss)
-                metrics.update(mets)
-                value_input = imag_feat
-
-        with tools.RequiresGrad(self.value):
-            with torch.cuda.amp.autocast(self._use_amp):
-                value = self.value(value_input[:-1].detach())
-                target = torch.stack(target, dim=1)
-                # (time, batch, 1), (time, batch, 1) -> (time, batch)
-                value_loss = -value.log_prob(target.detach())
-                slow_target = self._slow_value(value_input[:-1].detach())
-                if self._config.critic["slow_target"]:
-                    value_loss -= value.log_prob(slow_target.mode().detach())
-                # (time, batch, 1), (time, batch, 1) -> (1,)
-                value_loss = torch.mean(weights[:-1] * value_loss[:, :, None])
-
-        metrics.update(tools.tensorstats(value.mode(), "value"))
-        metrics.update(tools.tensorstats(target, "target"))
-        metrics.update(tools.tensorstats(reward, "imag_reward"))
-        if self._config.actor["dist"] in ["onehot"]:
-            metrics.update(
-                tools.tensorstats(
-                    torch.argmax(imag_action, dim=-1).float(), "imag_action"
-                )
-            )
-        else:
-            metrics.update(tools.tensorstats(imag_action, "imag_action"))
-        metrics["actor_entropy"] = to_np(torch.mean(actor_ent))
-        with tools.RequiresGrad(self):
-            metrics.update(self._actor_opt(actor_loss, self.actor.parameters()))
-            metrics.update(self._value_opt(value_loss, self.value.parameters()))
-        return imag_feat, imag_state, imag_action, weights, metrics
-
-    def _imagine(self, start, policy, horizon):
-        dynamics = self._world_model.dynamics
-        flatten = lambda x: x.reshape([-1] + list(x.shape[2:]))
-        start = {k: flatten(v) for k, v in start.items()}
-
-        def step(prev, _):
-            state, _, _ = prev
-            feat = dynamics.get_feat(state)
-            inp = feat.detach()
-            action = policy(inp).sample()
-            succ = dynamics.img_step(state, action)
-            return succ, feat, action
-
-        succ, feats, actions = tools.static_scan(
-            step, [torch.arange(horizon)], (start, None, None)
-        )
-        states = {k: torch.cat([start[k][None], v[:-1]], 0) for k, v in succ.items()}
-
-        return feats, states, actions
-
-    def _compute_lambda_return(self, batch):
-        lambda_returns = torch.empty_like(batch['reward']).to(self._config.device)
-        feat = batch['post']['feat']
-        
-        critic = self._slow_value
-        
-        values = critic(feat).mode().squeeze()
-        init_value = critic(batch['init_state']['feat']).mode().squeeze()
-        
-        last_return = values[-1] 
-        for i in reversed(range(len(feat))):
-            new_return = batch['reward'][i] + self._config.discount_gamma * (( (1 - self._config.discount_lambda) * values[i] ) + self._config.discount_lambda * last_return )
-            lambda_returns[i] = new_return
-            last_return = new_return
-        
-        shifted_values = torch.cat([values[:-1], torch.unsqueeze(init_value,0)])
-        
-        return lambda_returns, shifted_values
-
-    def _compute_actor_loss(
-        self,
-        batch,
-        target,
-        base,
-    ):
-        metrics = {}
-        offset, scale = self.reward_ema(target, self.ema_vals)
-        normed_target = (target - offset) / scale
-        normed_base = (base - offset) / scale
-        adv = normed_target - normed_base
-        metrics.update(tools.tensorstats(normed_target, "normed_target"))
-        metrics["EMA_005"] = to_np(self.ema_vals[0])
-        metrics["EMA_095"] = to_np(self.ema_vals[1])
-
-        actor_loss = (
-            batch['logprob'] * adv.detach()
-        )
-        return actor_loss, metrics
-
     def _update_slow_target(self):
         if self._config.critic["slow_target"]:
             if self._updates % self._config.critic["slow_target_update"] == 0:
@@ -856,3 +735,38 @@ class ACBehavior(nn.Module):
                 for s, d in zip(self.value.parameters(), self._slow_value.parameters()):
                     d.data = mix * s.data + (1 - mix) * d.data
             self._updates += 1
+
+
+
+class SaccadeRandomBehavior(nn.Module):
+    def __init__(self, config, act_space):
+        super(SaccadeRandomBehavior, self).__init__()
+        self._config = config
+        self._act_space = act_space
+
+    def actor(self, feat):
+        if self._config.actor["dist"] == "onehot":
+            return tools.OneHotDist(
+                torch.zeros(self._config.num_actions)
+                .repeat(self._config.envs, 1)
+                .to(self._config.device)
+            )
+        else:
+            return torchd.independent.Independent(
+                torchd.uniform.Uniform(
+                    torch.Tensor(self._act_space.low)
+                    .repeat(self._config.envs, 1)
+                    .to(self._config.device),
+                    torch.Tensor(self._act_space.high)
+                    .repeat(self._config.envs, 1)
+                    .to(self._config.device),
+                ),
+                1,
+            )
+
+    def saccade_train(self, batch):
+        return {}
+
+
+
+

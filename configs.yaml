@@ -13,7 +13,7 @@ defaults:
   debug: False
   video_pred_log: True
   backup_model_every: 100
-  agent: 'random' # random or ac
+  behavior: 'ac' # random or ac
 
   # Environment
   size: [64, 64]
@@ -76,7 +76,7 @@ defaults:
   disag_units: 400
   disag_action_cond: False
 
-sac-006:
+sac-007:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
@@ -94,9 +94,10 @@ sac-006:
   disag_action_cond: True
   actor: {layers: 3, dist: 'onehot', std: 'none'}
   video_pred_log: True
-  exp_name: 'sac-006'
+  exp_name: 'sac-007'
   # Environment
   num_loc_per_side: 4
+  behavior: 'random'
   
   
 

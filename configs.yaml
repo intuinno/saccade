@@ -13,6 +13,7 @@ defaults:
   debug: False
   video_pred_log: True
   backup_model_every: 100
+  agent: 'random' # random or ac
 
   # Environment
   size: [64, 64]

@@ -110,3 +110,4 @@ debug:
   device: 'cpu'
   envs: 2
   num_steps: 4
+  exp_name: 'debug_'

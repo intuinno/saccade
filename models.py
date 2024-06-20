@@ -297,7 +297,7 @@ class WorldModel(nn.Module):
                 mask[b, t, :, :] = self.mask_action(actions[b, t])
 
         mask *= 255
-        truth[:, :, :, :, 0] = mask
+        truth[:, :, :, :, 1] = mask
 
         return torch.cat([truth, model, error], 2), to_np(mse)
         

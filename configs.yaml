@@ -75,7 +75,7 @@ defaults:
   disag_units: 400
   disag_action_cond: False
 
-sac-006:
+sac-006-rev1:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
@@ -91,9 +91,9 @@ sac-006:
   disag_layers: 4
   disag_units: 400
   disag_action_cond: True
-  actor: {layers: 3, dist: 'onehot', std: 'none'}
+  actor: {layers: 3, dist: 'onehot', std: 'none', entropy: 3e-1,}
   video_pred_log: True
-  exp_name: 'sac-006'
+  exp_name: 'sac-006-rev1'
   # Environment
   num_loc_per_side: 4
   

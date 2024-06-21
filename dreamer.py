@@ -5,6 +5,7 @@ import functools
 import os
 import pathlib
 import sys
+from envs.vec_sac_env import VecSaccadeEnvAdapter
 import torchvision
 
 os.environ["MUJOCO_GL"] = "glfw"
@@ -28,14 +29,36 @@ from torch import distributions as torchd
 
 to_np = lambda x: x.detach().cpu().numpy()
 
+def append_buffer(buffer, item):
+    for key, val in item.items():
+        if key not in buffer:
+            if isinstance(val,dict):
+                buffer[key] = {}
+            else:
+                buffer[key] = []
+        if isinstance(val, dict):
+            append_buffer(buffer[key], val)
+        else:
+            buffer[key].append(val)
 
+def build_batch(buffer):
+    for key, val in buffer.items():
+        if isinstance(val, dict):
+            buffer[key] = build_batch(buffer[key])
+        else:
+            buffer[key] = torch.stack(buffer[key])
+    swap = lambda x: x.permute([1, 0] + list(range(2, len(x.shape))))
+    buffer = {k:swap(v) for k, v in buffer.items()}
+    return buffer
+            
+        
 class Dreamer(nn.Module):
-    def __init__(self, obs_space, act_space, config, logger, dataset):
+    def __init__(self, obs_space, act_space, config, logger, dataset, envs):
         super(Dreamer, self).__init__()
         self._config = config
         self._logger = logger
         self._should_log = tools.Every(config.log_every)
-        batch_steps = config.batch_size * config.batch_length
+        batch_steps = config.envs * config.num_steps
         self._should_train = tools.Every(batch_steps / config.train_ratio)
         self._should_pretrain = tools.Once()
         self._should_reset = tools.Every(config.reset_every)
@@ -45,6 +68,7 @@ class Dreamer(nn.Module):
         self._step = logger.step // config.action_repeat
         self._update_count = 0
         self._dataset = dataset
+        self._envs = envs
         self._wm = models.WorldModel(obs_space, act_space, self._step, config)
         # self._task_behavior = models.ImagBehavior(config, self._wm)
         if (
@@ -58,6 +82,56 @@ class Dreamer(nn.Module):
             random=lambda: expl.Random(config, act_space),
             plan2explore=lambda: expl.Plan2Explore(config, self._wm, reward),
         )[config.expl_behavior]().to(self._config.device)
+
+    def get_batch(self, training=True):
+        obs = self._envs.reset()
+        buffer = {}
+        state = None
+        
+        for i in range(self._config.num_steps):
+            policy_output, state = self._policy(obs, state, training)
+            obs, reward, done, info = self._envs.step(policy_output['action'])
+            append_buffer(buffer, {
+                'central': obs['central'], 
+                'peripheral': obs['peripheral'],
+                'is_first': obs['is_first'],
+                'is_last': obs['is_last'], 
+                'is_terminal': obs['is_terminal'],
+                'GT': obs['GT'],
+                'reward': reward,
+                'discount': 1.0 - done,
+                'action': policy_output['action'],
+                'logprob': policy_output['logprob'],
+            })
+        batch = build_batch(buffer)
+        return batch
+                          
+        
+    def get_init_wm_state(self):
+        init_state = self._wm.dynamics.initial(self._config.envs)
+        return init_state
+    
+    def saccade_evaluation(self, batch):
+        return self._wm.saccade_video_evaluation(batch)
+
+
+   
+
+    def estimate_state(self, state, action, obs):
+        obs = self._wm.preprocess(obs)
+        embed = self._wm.encoder(obs)
+        post, prior = self._wm.dynamics.obs_step(state, action, embed, obs["is_first"])
+        post['feat'] = self._wm.dynamics.get_feat(post)
+        prior['feat'] = self._wm.dynamics.get_feat(prior)
+        return post, prior
+
+    def calculate_reward(self, batch, method="prediction"):
+        recon = self._wm.heads["decoder"](batch["prior"]['feat'])[
+            "central"
+        ].mode()
+        reward = 0.5 * (recon - batch["obs"]["central"]) ** 2
+        return torch.mean(reward, 2)
+
 
     def __call__(self, obs, reset, state=None, training=True):
         step = self._step
@@ -76,7 +150,7 @@ class Dreamer(nn.Module):
                     self._logger.scalar(name, float(np.mean(values)))
                     self._metrics[name] = []
                 if self._config.video_pred_log:
-                    openl, mse = self._wm.saccade_video_pred(next(self._dataset))
+                    openl, mse = self._wm.saccade_video_pred(self.get_batch())
                     self._logger.video("train_openl", to_np(openl))
                     self._logger.scalar("Sac_MSE", mse)
                 self._logger.write(fps=True)
@@ -144,8 +218,8 @@ def count_steps(folder):
 
 
 def make_dataset(episodes, config):
-    generator = tools.sample_episodes(episodes, config.batch_length)
-    dataset = tools.from_generator(generator, config.batch_size)
+    generator = tools.sample_episodes(episodes, config.num_steps)
+    dataset = tools.from_generator(generator, config.envs)
     return dataset
 
 
@@ -265,6 +339,7 @@ def main(config):
     else:
         train_envs = [Damy(env) for env in train_envs]
         eval_envs = [Damy(env) for env in eval_envs]
+    vec_envs = VecSaccadeEnvAdapter(config)
     acts = train_envs[0].action_space
     print("Action Space", acts)
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
@@ -312,6 +387,7 @@ def main(config):
         config,
         logger,
         train_dataset,
+        vec_envs
     ).to(config.device)
     agent.requires_grad_(requires_grad=False)
     if (logdir / "latest.pt").exists():

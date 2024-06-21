@@ -12,6 +12,27 @@
       "console": "integratedTerminal"
     }, 
     {
+      "name": "sac-008",
+      "type": "debugpy", 
+      "request": "launch", 
+      "program": "${workspaceFolder}/dreamer.py",
+      "console": "integratedTerminal",
+      "justMyCode": true, 
+      "args": [
+          "--configs", "defaults",  "sac-008", 
+          "--device", "cuda:0",
+          // "--logdir", "./logs/debug"
+          // "--debug", "True",
+      ],
+      "env": {
+          // "XLA_PYTHON_CLIENT_MEM_FRACTION": ".30",
+          // "XLA_PYTHON_CLIENT_ALLOCATOR": "platform",
+      }
+      // "environment": [
+      //     {"name": "XLA_PYTHON_CLIENT_MEM_FRACTION", "value": ".10"}
+      // ],
+  },
+    {
       "name": "mmnist",
       "type": "debugpy", 
       "request": "launch", 

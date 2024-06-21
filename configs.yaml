@@ -22,7 +22,6 @@ defaults:
   # Environment
   task: 'dmc_walker_walk'
   size: [64, 64]
-  envs: 1
   action_repeat: 1
   time_limit: 1000
   grayscale: False
@@ -62,8 +61,8 @@ defaults:
   initial: 'learned'
 
   # Training
-  batch_size: 16
-  batch_length: 64
+  envs: 16
+  num_steps: 64
   train_ratio: 512
   pretrain: 100
   model_lr: 1e-4
@@ -284,13 +283,38 @@ sac-004-rev6:
   video_pred_log: True
   exp_name: 'sac-004-rev6'
 
+
+sac-008:
+  task: 'saccade_MMNIST'
+  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
+  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
+  envs: 32
+  # Environment
+  num_loc_per_side: 4
+  parallel: False
+    # Exploration
+  expl_behavior: 'random'
+  expl_until: 10000000000000000
+  expl_extr_scale: 0.0
+  expl_intr_scale: 1.0
+  disag_target: 'stoch'
+  disag_log: True
+  disag_models: 10
+  disag_offset: 1
+  disag_layers: 4
+  disag_units: 400
+  disag_action_cond: True
+  actor: {layers: 5, dist: 'onehot', std: 'none'}
+  video_pred_log: True
+  exp_name: 'sac-008'
+  compile: False
+
 debug:
   debug: True
   pretrain: 1
   prefill: 1
-  batch_size: 10
-  batch_length: 20
+  envs: 10
+  num_steps: 20
   device: 'cpu'
-  envs: 2
   parallel: False
   exp_name: 'debug-'

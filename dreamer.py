@@ -89,10 +89,10 @@ class Dreamer(nn.Module):
 
     def get_batch(self, training=True):
         obs = self._envs.reset()
-        buffer = {}
         state = None
 
         while True:
+            buffer = {}
             for i in range(self._config.num_steps):
                 policy_output, state = self._policy(obs, state, training)
                 obs, reward, done, info = self._envs.step(policy_output["action"])
@@ -133,35 +133,6 @@ class Dreamer(nn.Module):
         recon = self._wm.heads["decoder"](batch["prior"]["feat"])["central"].mode()
         reward = 0.5 * (recon - batch["obs"]["central"]) ** 2
         return torch.mean(reward, 2)
-
-    def __call__(self, obs, reset, state=None, training=True):
-        step = self._step
-        if training:
-            steps = (
-                self._config.pretrain
-                if self._should_pretrain()
-                else self._should_train(step)
-            )
-            for _ in range(steps):
-                self._train(next(self.data))
-                self._update_count += 1
-                self._metrics["update_count"] = self._update_count
-            if self._should_log(step):
-                for name, values in self._metrics.items():
-                    self._logger.scalar(name, float(np.mean(values)))
-                    self._metrics[name] = []
-                if self._config.video_pred_log:
-                    openl, mse = self._wm.saccade_video_pred(next(self.data))
-                    self._logger.video("train_openl", to_np(openl))
-                    self._logger.scalar("Sac_MSE", mse)
-                self._logger.write(fps=True)
-
-        policy_output, state = self._policy(obs, state, training)
-
-        if training:
-            self._step += len(reset)
-            self._logger.step = self._config.action_repeat * self._step
-        return policy_output, state
 
     def _policy(self, obs, state, training):
         if state is None:
@@ -360,7 +331,7 @@ def main(config):
     # Main Loop
     step = 0
     for i in tqdm(range(int(num_epochs))):
-        agent._train(agent.get_batch())
+        agent._train(next(agent.data))
         agent._update_count += 1
         agent._metrics["update_count"] = agent._update_count
 
@@ -369,7 +340,7 @@ def main(config):
                 agent._logger.scalar(name, float(np.mean(values)))
                 agent._metrics[name] = []
             if agent._config.video_pred_log:
-                openl, mse = agent._wm.saccade_video_pred(agent.get_batch())
+                openl, mse = agent._wm.saccade_video_pred(next(agent.data))
                 agent._logger.video("train_openl", to_np(openl))
                 agent._logger.scalar("Sac_MSE", mse)
             agent._logger.write(fps=True)

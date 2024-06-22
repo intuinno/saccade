@@ -16,10 +16,11 @@ to_np = lambda x: x.detach().cpu().numpy()
 
 # torch.autograd.set_detect_anomaly(True)
 
+
 def append_buffer(buffer, item):
     for key, val in item.items():
         if key not in buffer:
-            if isinstance(val,dict):
+            if isinstance(val, dict):
                 buffer[key] = {}
             else:
                 buffer[key] = []
@@ -28,6 +29,7 @@ def append_buffer(buffer, item):
         else:
             buffer[key].append(val)
 
+
 def build_batch(buffer):
     for key, val in buffer.items():
         if isinstance(val, dict):
@@ -35,9 +37,7 @@ def build_batch(buffer):
         else:
             buffer[key] = torch.stack(buffer[key])
     return buffer
-            
-        
-    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -45,10 +45,8 @@ if __name__ == "__main__":
     parser.add_argument("--load_model", type=str)
     args, remaining = parser.parse_known_args()
     rootdir = pathlib.Path(sys.argv[0]).parent
-    yaml = YAML(typ='safe')
-    configs = yaml.load((
-       rootdir / "configs.yaml"
-    ).read_text())
+    yaml = YAML(typ="safe")
+    configs = yaml.load((rootdir / "configs.yaml").read_text())
 
     def recursive_update(base, update):
         for key, value in update.items():
@@ -56,11 +54,11 @@ if __name__ == "__main__":
                 recursive_update(base[key], value)
             else:
                 base[key] = value
-           
+
     name_list = ["defaults", *args.configs] if args.configs else ["defaults"]
     defaults = {}
     for name in name_list:
-        recursive_update(defaults, configs[name])     
+        recursive_update(defaults, configs[name])
     parser = argparse.ArgumentParser()
     for key, value in sorted(defaults.items(), key=lambda x: x[0]):
         arg_type = tools.args_type(value)
@@ -82,8 +80,6 @@ if __name__ == "__main__":
     print("Logdir", exp_logdir)
     exp_logdir.mkdir(parents=True, exist_ok=True)
 
-
-
     # Setting up environments
     envs = VecSaccadeEnvAdapter(configs)
     acts = envs.action_space
@@ -91,7 +87,7 @@ if __name__ == "__main__":
     configs.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
     num_epochs = configs.total_steps // configs.envs // configs.num_steps
     configs.use_amp = True if configs.precision == 16 else False
-    
+
     # Build logger
     logger = tools.Logger(exp_logdir, 0)
     metrics = {}
@@ -100,7 +96,7 @@ if __name__ == "__main__":
     yaml.default_flow_style = False
     with open(exp_logdir / "config.yml", "w") as f:
         yaml.dump(vars(configs), f)
-        
+
     agent = SaccadeAgent(
         envs.observation_space,
         envs.action_space,
@@ -112,38 +108,41 @@ if __name__ == "__main__":
 
     # Main Loop
     step = 0
-    for i in tqdm(range(int(num_epochs))):
-        _ = envs.reset()
-        init_state = agent.get_init_wm_state()
-        buffer = {}
+    _ = envs.reset()
+    init_state = agent.get_init_wm_state()
+    state = init_state
 
-        state = init_state
+    for i in tqdm(range(int(num_epochs))):
         with tools.RequiresGrad(agent):
             with torch.cuda.amp.autocast(configs.use_amp):
+                buffer = {}
                 for j in range(configs.num_steps):
                     action, logprob, actor_ent = agent.get_action(state)
                     obs, _, _, _ = envs.step(action)
                     post, prior = agent.estimate_state(state, action, obs)
                     state = post
-                    append_buffer(buffer, {
-                        "post": post,
-                        "prior": prior,
-                        "action": action,
-                        "logprob": logprob,
-                        "actor_ent": actor_ent,
-                        "obs": obs,
-                    })
+                    append_buffer(
+                        buffer,
+                        {
+                            "post": post,
+                            "prior": prior,
+                            "action": action,
+                            "logprob": logprob,
+                            "actor_ent": actor_ent,
+                            "obs": obs,
+                        },
+                    )
                 batch = build_batch(buffer)
-                batch['reward'] = agent.calculate_reward(batch, method='prediction')    
-                batch['init_state'] = init_state
-                agent.saccade_train(buffer)
+                batch["reward"] = agent.calculate_reward(batch, method="prediction")
+                batch["init_state"] = init_state
+                agent.saccade_train(batch)
 
         if i % configs.eval_every == 0:
             openl, mse = agent.saccade_evaluation(batch)
             logger.video("train_openl", to_np(openl))
             logger.scalar("Sac_MSE", mse)
 
-        logger.step =  (i+1)*configs.envs*configs.num_steps
+        logger.step = (i + 1) * configs.envs * configs.num_steps
 
         if i % configs.log_every == 0:
             for name, values in agent._metrics.items():
@@ -151,13 +150,12 @@ if __name__ == "__main__":
                 agent._metrics[name] = []
 
         logger.write(fps=True)
-        
-        
-        if i % configs.backup_model_every == 0:        
+
+        if i % configs.backup_model_every == 0:
             items_to_save = {
-            "agent_state_dict": agent.state_dict(),
-            "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
-        }
+                "agent_state_dict": agent.state_dict(),
+                "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
+            }
             torch.save(items_to_save, exp_logdir / "latest.pt")
 
     print("Training complete.")

@@ -7,9 +7,9 @@ defaults:
   offline_evaldir: ''
   seed: 0
   deterministic_run: False
-  steps: 1e6
+  total_steps: 1e9
   parallel: True
-  eval_every: 0
+  eval_every: 10
   eval_episode_num: 10
   log_every: 10000
   reset_every: 0
@@ -288,7 +288,7 @@ sac-008:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 32
+  envs: 128
   # Environment
   num_loc_per_side: 4
   parallel: False
@@ -307,7 +307,7 @@ sac-008:
   actor: {layers: 5, dist: 'onehot', std: 'none'}
   video_pred_log: True
   exp_name: 'sac-008'
-  compile: False
+  compile: True
 
 debug:
   debug: True
@@ -318,3 +318,4 @@ debug:
   device: 'cpu'
   parallel: False
   exp_name: 'debug-'
+  compile: False

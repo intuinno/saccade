@@ -6,6 +6,7 @@ import os
 import pathlib
 import sys
 from envs.vec_sac_env import VecSaccadeEnvAdapter
+from tqdm import tqdm
 import torchvision
 
 os.environ["MUJOCO_GL"] = "glfw"
@@ -306,7 +307,6 @@ def main(config):
     logdir = rootdir / config.logdir / exp_name
     config.traindir = config.traindir or logdir / "train_eps"
     config.evaldir = config.evaldir or logdir / "eval_eps"
-    config.steps //= config.action_repeat
     config.eval_every //= config.action_repeat
     config.log_every //= config.action_repeat
     config.time_limit //= config.action_repeat
@@ -343,98 +343,39 @@ def main(config):
     acts = train_envs[0].action_space
     print("Action Space", acts)
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
-
+    num_epochs = config.total_steps // config.envs // config.num_steps
+    
     state = None
-    if not config.offline_traindir:
-        prefill = max(0, config.prefill - count_steps(config.traindir))
-        print(f"Prefill dataset ({prefill} steps).")
-        if hasattr(acts, "discrete"):
-            random_actor = tools.OneHotDist(
-                torch.zeros(config.num_actions).repeat(config.envs, 1)
-            )
-        else:
-            random_actor = torchd.independent.Independent(
-                torchd.uniform.Uniform(
-                    torch.Tensor(acts.low).repeat(config.envs, 1),
-                    torch.Tensor(acts.high).repeat(config.envs, 1),
-                ),
-                1,
-            )
-
-        def random_agent(o, d, s):
-            action = random_actor.sample()
-            logprob = random_actor.log_prob(action)
-            return {"action": action, "logprob": logprob}, None
-
-        state = tools.simulate(
-            random_agent,
-            train_envs,
-            train_eps,
-            config.traindir,
-            logger,
-            limit=config.dataset_size,
-            steps=prefill,
-        )
-        logger.step += prefill * config.action_repeat
-        print(f"Logger: ({logger.step} steps).")
-
-    print("Simulate agent.")
-    train_dataset = make_dataset(train_eps, config)
-    eval_dataset = make_dataset(eval_eps, config)
     agent = Dreamer(
-        train_envs[0].observation_space,
-        train_envs[0].action_space,
+        vec_envs.observation_space,
+        vec_envs.action_space,
         config,
         logger,
-        train_dataset,
+        None,
         vec_envs
     ).to(config.device)
-    agent.requires_grad_(requires_grad=False)
-    if (logdir / "latest.pt").exists():
-        checkpoint = torch.load(logdir / "latest.pt")
-        agent.load_state_dict(checkpoint["agent_state_dict"])
-        tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
-        agent._should_pretrain._once = False
 
-    # make sure eval will be executed once after config.steps
-    while agent._step < config.steps + config.eval_every:
-        logger.write()
-        if config.eval_every > 0 and config.eval_episode_num > 0:
-            print("Start evaluation.")
-            eval_policy = functools.partial(agent, training=False)
-            tools.simulate(
-                eval_policy,
-                eval_envs,
-                eval_eps,
-                config.evaldir,
-                logger,
-                is_eval=True,
-                episodes=config.eval_episode_num,
-            )
-            if config.video_pred_log:
-                video_pred = agent._wm.video_pred(next(eval_dataset))
-                logger.video("eval_openl", to_np(video_pred))
-        print("Start training.")
-        state = tools.simulate(
-            agent,
-            train_envs,
-            train_eps,
-            config.traindir,
-            logger,
-            limit=config.dataset_size,
-            steps=10000,
-            state=state,
-        )
-        items_to_save = {
-            "agent_state_dict": agent.state_dict(),
-            "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
-        }
-        torch.save(items_to_save, logdir / "latest.pt")
-    for env in train_envs + eval_envs:
-        try:
-            env.close()
-        except Exception:
-            pass
+    print(f"========== Using {config.device} device ===================")
+
+    # Main Loop
+    step = 0
+    for i in tqdm(range(int(num_epochs))):
+        agent._train(agent.get_batch())
+        agent._update_count += 1
+        agent._metrics["update_count"] = agent._update_count
+
+        if step % config.eval_every == 0:
+            for name, values in agent._metrics.items():
+                agent._logger.scalar(name, float(np.mean(values)))
+                agent._metrics[name] = []
+            if agent._config.video_pred_log:
+                openl, mse = agent._wm.saccade_video_pred(agent.get_batch())
+                agent._logger.video("train_openl", to_np(openl))
+                agent._logger.scalar("Sac_MSE", mse)
+            agent._logger.write(fps=True)
+
+        logger.step = (i+1) * config.envs * config.num_steps
+
 
 
 if __name__ == "__main__":

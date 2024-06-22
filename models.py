@@ -221,7 +221,7 @@ class WorldModel(nn.Module):
         states, _ = self.dynamics.observe(embed, data["action"], data["is_first"])
 
         B, T, _ = states["deter"].shape
-        num_actions = self.act_space.shape[0]
+        num_actions = self.act_space.n
         raster_scan_action = torch.zeros((16, num_actions), device=self._config.device)
         raster_timing = 0
 

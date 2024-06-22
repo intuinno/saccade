@@ -284,11 +284,11 @@ sac-004-rev6:
   exp_name: 'sac-004-rev6'
 
 
-sac-008:
+sac-008-rev0:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 32
+  envs: 64
   # Environment
   num_loc_per_side: 4
   parallel: False
@@ -306,8 +306,8 @@ sac-008:
   disag_action_cond: True
   actor: {layers: 5, dist: 'onehot', std: 'none'}
   video_pred_log: True
-  exp_name: 'sac-008'
-  compile: False
+  exp_name: 'sac-008-rev0'
+  compile: True
 
 debug:
   debug: True

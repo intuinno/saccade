@@ -19,7 +19,7 @@
       "console": "integratedTerminal",
       "justMyCode": true, 
       "args": [
-          "--configs", "defaults",  "sac-008", 
+          "--configs", "defaults",  "sac-008-rev0", 
           "--device", "cuda:0",
           // "--logdir", "./logs/debug"
           // "--debug", "True",

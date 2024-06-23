@@ -292,7 +292,8 @@ sac-010-rev1:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 64
+  envs: 32
+  batch_size: 512
   eval_envs: 512
   # Environment
   num_loc_per_side: 4

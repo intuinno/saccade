@@ -2,6 +2,7 @@ import copy
 import torch
 from torch import nn
 import einops
+import matplotlib.pyplot as plt
 
 import networks
 import tools
@@ -254,8 +255,13 @@ class WorldModel(nn.Module):
             images.append(image)
 
         model = torch.stack(images, dim=1)
-        mse = (model - data["GT"]) ** 2
-        mse = mse.mean()
+        diff = (model - data["GT"]) ** 2
+        sct = diff.mean(dim=[0, 2, 3])
+        mse = sct.mean()
+
+        fig = plt.figure()
+        plt.plot(sct.cpu())
+        plt.title("Scene Convergence Time")
 
         model = model[:6]
 
@@ -277,7 +283,7 @@ class WorldModel(nn.Module):
         mask *= 255
         truth[:, :, :, :, 0] = mask
 
-        return torch.cat([truth, model, error], 2), to_np(mse)
+        return torch.cat([truth, model, error], 2), to_np(mse), fig
 
     def mask_action(self, index):
         mask = torch.zeros((64, 64), device=self._config.device)

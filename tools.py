@@ -74,6 +74,9 @@ class Logger:
     def video(self, name, value):
         self._videos[name] = np.array(value)
 
+    def add_figure(self, name, value):
+        self._writer.add_figure(name, value, self.step)
+
     def write(self, fps=False, step=False):
         if not step:
             step = self.step

@@ -14,20 +14,21 @@ class Random(nn.Module):
         self._act_space = act_space
 
     def actor(self, feat):
+        num_envs = feat.shape[0]
         if self._config.actor["dist"] == "onehot":
             return tools.OneHotDist(
                 torch.zeros(self._config.num_actions)
-                .repeat(self._config.envs, 1)
+                .repeat(num_envs, 1)
                 .to(self._config.device)
             )
         else:
             return torchd.independent.Independent(
                 torchd.uniform.Uniform(
                     torch.Tensor(self._act_space.low)
-                    .repeat(self._config.envs, 1)
+                    .repeat(num_envs, 1)
                     .to(self._config.device),
                     torch.Tensor(self._act_space.high)
-                    .repeat(self._config.envs, 1)
+                    .repeat(num_envs, 1)
                     .to(self._config.device),
                 ),
                 1,

@@ -1,6 +1,7 @@
 defaults:
   exp_name: 'default'
   logdir: 'logs'
+  load_model: ''
   traindir: null
   evaldir: null
   offline_traindir: ''
@@ -62,6 +63,7 @@ defaults:
 
   # Training
   envs: 16
+  eval_envs: 16
   num_steps: 64
   train_ratio: 512
   pretrain: 100
@@ -284,11 +286,12 @@ sac-004-rev6:
   exp_name: 'sac-004-rev6'
 
 
-sac-008-rev0:
+sac-010-rev0:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   envs: 64
+  eval_envs: 512
   # Environment
   num_loc_per_side: 4
   parallel: False
@@ -306,7 +309,7 @@ sac-008-rev0:
   disag_action_cond: True
   actor: {layers: 5, dist: 'onehot', std: 'none'}
   video_pred_log: True
-  exp_name: 'sac-008-rev0'
+  exp_name: 'sac-010-rev0'
   compile: True
 
 debug:

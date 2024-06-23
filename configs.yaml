@@ -284,7 +284,7 @@ sac-004-rev6:
   exp_name: 'sac-004-rev6'
 
 
-sac-008-rev2:
+sac-008-rev3:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
@@ -306,7 +306,7 @@ sac-008-rev2:
   disag_action_cond: True
   actor: {layers: 5, dist: 'onehot', std: 'none'}
   video_pred_log: True
-  exp_name: 'sac-008-rev2'
+  exp_name: 'sac-008-rev3'
   compile: True
 
 debug:

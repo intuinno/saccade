@@ -93,6 +93,23 @@ class Dreamer(nn.Module):
 
         while True:
             buffer = {}
+            append_buffer(
+                buffer,
+                {
+                    "central": obs["central"],
+                    "peripheral": obs["peripheral"],
+                    "is_first": obs["is_first"],
+                    "is_last": obs["is_last"],
+                    "is_terminal": obs["is_terminal"],
+                    "GT": obs["GT"],
+                    "reward": torch.zeros([self._config.envs]).to(self._config.device),
+                    "discount": torch.ones([self._config.envs]).to(self._config.device),
+                    "action": torch.zeros(
+                        [self._config.envs, self._config.num_actions]
+                    ).to(self._config.device),
+                    "logprob": torch.zeros([self._config.envs]).to(self._config.device),
+                },
+            )
             for i in range(self._config.num_steps):
                 policy_output, state = self._policy(obs, state, training)
                 obs, reward, done, info = self._envs.step(policy_output["action"])

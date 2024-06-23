@@ -149,7 +149,9 @@ class WorldModel(nn.Module):
                     for key, value in losses.items()
                 }
                 model_loss = sum(scaled.values()) + kl_loss
-            metrics = self._model_opt(torch.mean(model_loss), self.parameters())
+            metrics = self._model_opt(
+                torch.mean(model_loss), self.parameters(), retain_graph=False
+            )
 
         metrics.update({f"{name}_loss": to_np(loss) for name, loss in losses.items()})
         metrics["kl_free"] = kl_free

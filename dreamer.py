@@ -291,27 +291,27 @@ def main(config):
     logger = tools.Logger(logdir, config.action_repeat * step)
 
     print("Create envs.")
-    if config.offline_traindir:
-        directory = config.offline_traindir.format(**vars(config))
-    else:
-        directory = config.traindir
-    train_eps = tools.load_episodes(directory, limit=config.dataset_size)
-    if config.offline_evaldir:
-        directory = config.offline_evaldir.format(**vars(config))
-    else:
-        directory = config.evaldir
-    eval_eps = tools.load_episodes(directory, limit=1)
-    make = lambda mode, id: make_env(config, mode, id)
-    train_envs = [make("train", i) for i in range(config.envs)]
-    eval_envs = [make("eval", i) for i in range(config.envs)]
-    if config.parallel:
-        train_envs = [Parallel(env, "process") for env in train_envs]
-        eval_envs = [Parallel(env, "process") for env in eval_envs]
-    else:
-        train_envs = [Damy(env) for env in train_envs]
-        eval_envs = [Damy(env) for env in eval_envs]
+    # if config.offline_traindir:
+    #     directory = config.offline_traindir.format(**vars(config))
+    # else:
+    #     directory = config.traindir
+    # train_eps = tools.load_episodes(directory, limit=config.dataset_size)
+    # if config.offline_evaldir:
+    #     directory = config.offline_evaldir.format(**vars(config))
+    # else:
+    #     directory = config.evaldir
+    # eval_eps = tools.load_episodes(directory, limit=1)
+    # make = lambda mode, id: make_env(config, mode, id)
+    # train_envs = [make("train", i) for i in range(config.envs)]
+    # eval_envs = [make("eval", i) for i in range(config.envs)]
+    # if config.parallel:
+    #     train_envs = [Parallel(env, "process") for env in train_envs]
+    #     eval_envs = [Parallel(env, "process") for env in eval_envs]
+    # else:
+    #     train_envs = [Damy(env) for env in train_envs]
+    #     eval_envs = [Damy(env) for env in eval_envs]
     vec_envs = VecSaccadeEnvAdapter(config)
-    acts = train_envs[0].action_space
+    acts = vec_envs.action_space
     print("Action Space", acts)
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
     num_epochs = config.total_steps // config.envs // config.num_steps

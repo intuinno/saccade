@@ -7,9 +7,9 @@ defaults:
   offline_evaldir: ''
   seed: 0
   deterministic_run: False
-  total_steps: 1e9
+  total_steps: 1e10
   parallel: True
-  eval_every: 10
+  eval_every: 1
   eval_episode_num: 10
   log_every: 10000
   reset_every: 0
@@ -62,7 +62,7 @@ defaults:
 
   # Training
   envs: 16
-  num_steps: 64
+  num_steps: 128
   train_ratio: 512
   pretrain: 100
   model_lr: 1e-4
@@ -288,7 +288,7 @@ sac-008-rev2:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 128
+  envs: 512
   # Environment
   num_loc_per_side: 4
   parallel: False

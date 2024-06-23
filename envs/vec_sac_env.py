@@ -61,8 +61,7 @@ class VecSaccadeEnv(gym.Env):
         self.observation_space = spaces.Dict(
             {
                 "central": spaces.Box(
-                    0, 255, shape=(self.central_size, self.central_size), 
-                    dtype=np.uint8
+                    0, 255, shape=(self.central_size, self.central_size), dtype=np.uint8
                 ),
                 "peripheral": spaces.Box(
                     0, 255, shape=(self.peri_size, self.peri_size), dtype=np.uint8
@@ -121,15 +120,17 @@ class VecSaccadeEnv(gym.Env):
             (speeds * torch.cos(direcs), speeds * torch.sin(direcs)),
             dim=1,
         )
-        self.loc = torch.randint(self.num_loc_per_side**2, (self.num_env,), device=self.device)
+        self.loc = torch.randint(
+            self.num_loc_per_side**2, (self.num_env,), device=self.device
+        )
         self.positions = torch.mul(
             torch.rand(
                 (
                     self.num_env,
                     self.nums_per_image,
                     2,
-                ), 
-                device=self.device
+                ),
+                device=self.device,
             ),
             self.lims,
         )
@@ -191,7 +192,9 @@ class VecSaccadeEnv(gym.Env):
         x, y = pos.to(dtype=torch.int)
         x = torch.clamp(x, min=0, max=self.lims[0])
         y = torch.clamp(y, min=0, max=self.lims[1])
-        canvas = torch.zeros((self.width, self.height), dtype=torch.uint8).to(self.device)
+        canvas = torch.zeros((self.width, self.height), dtype=torch.uint8).to(
+            self.device
+        )
         canvas[x : x + self.mnist_width, y : y + self.mnist_height] = patch
         return canvas
 
@@ -302,7 +305,7 @@ class VecSaccadeEnv(gym.Env):
             self.window = None
 
 
-class VecSaccadeEnvAdapter:   
+class VecSaccadeEnvAdapter:
     def __init__(self, configs):
         env = VecSaccadeEnv(
             num_loc_per_side=configs.num_loc_per_side,
@@ -351,12 +354,12 @@ class VecSaccadeEnvAdapter:
 
     def step(self, action):
         if len(action.shape) > 1:
-            action = torch.argmax(action,1)
+            action = torch.argmax(action, 1)
         obs, reward, done, truncated, info = self._env.step(action)
         if not self._obs_is_dict:
             obs = {self._obs_key: obs}
         obs = self.flatten_obs(obs)
-        obs["is_first"] = torch.ones((self.num_envs,))
+        obs["is_first"] = torch.zeros((self.num_envs,))
         obs["is_last"] = torch.zeros((self.num_envs,))
         obs["is_terminal"] = torch.zeros((self.num_envs))
         obs["GT"] = info["canvas"]

@@ -13,12 +13,13 @@ defaults:
   eval_every: 0
   eval_episode_num: 10
   log_every: 10000
+  saccade_eval_every: 100000
   reset_every: 0
   device: 'cuda:0'
   compile: True
   precision: 32
   debug: False
-  video_pred_log: True
+  saccade_evaluation: True
 
   # Environment
   task: 'dmc_walker_walk'
@@ -64,6 +65,7 @@ defaults:
   # Training
   envs: 16
   eval_envs: 16
+  total_eval_envs: 10240
   num_steps: 64
   train_ratio: 512
   pretrain: 100
@@ -308,7 +310,7 @@ sac-010-rev1:
   disag_units: 400
   disag_action_cond: True
   actor: {layers: 5, dist: 'onehot', std: 'none'}
-  video_pred_log: True
+  saccade_evaluation: True
   exp_name: 'sac-010-rev1'
   compile: True
 
@@ -316,7 +318,8 @@ debug:
   debug: True
   pretrain: 1
   prefill: 1
-  envs: 10
+  envs: 4
+  eval_envs: 128
   num_steps: 20
   device: 'cpu'
   parallel: False

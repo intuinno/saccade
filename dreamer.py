@@ -1,4 +1,5 @@
 from datetime import datetime
+import matplotlib.pyplot as plt
 import pytz
 import argparse
 import functools
@@ -60,6 +61,7 @@ class Dreamer(nn.Module):
         self._config = config
         self._logger = logger
         self._should_log = tools.Every(config.log_every)
+        self._should_saccade_eval = tools.Every(config.saccade_eval_every)
         batch_steps = config.envs * config.num_steps
         self._should_train = tools.Every(batch_steps / config.train_ratio)
         self._should_pretrain = tools.Once()
@@ -115,8 +117,23 @@ class Dreamer(nn.Module):
         init_state = self._wm.dynamics.initial(self._config.envs)
         return init_state
 
-    def saccade_evaluation(self, batch):
-        return self._wm.saccade_video_evaluation(batch)
+    def saccade_evaluation(self):
+        sct_buf = []
+        epochs = self._config.total_eval_envs // self._config.eval_envs
+        for i in range(epochs):
+            openl, sct = self._wm.saccade_video_pred(self.get_batch(training=False))
+            sct_buf.append(sct)
+
+        sct = torch.stack(sct_buf)
+        sct = torch.mean(sct, 0)
+        mse = torch.mean(sct)
+        fig = plt.figure()
+        plt.plot(sct.cpu())
+        plt.title("Scene Convergence Time")
+
+        self._logger.video("train_openl", to_np(openl))
+        self._logger.scalar("Sac_MSE", mse)
+        self._logger.add_figure("SCT", fig)
 
     def estimate_state(self, state, action, obs):
         obs = self._wm.preprocess(obs)
@@ -140,21 +157,16 @@ class Dreamer(nn.Module):
                 else self._should_train(step)
             )
             for _ in range(steps):
-                self._train(next(self._dataset))
+                # self._train(next(self._dataset))
                 self._update_count += 1
                 self._metrics["update_count"] = self._update_count
             if self._should_log(step):
                 for name, values in self._metrics.items():
                     self._logger.scalar(name, float(np.mean(values)))
                     self._metrics[name] = []
-                if self._config.video_pred_log:
-                    openl, mse, fig = self._wm.saccade_video_pred(
-                        self.get_batch(training=False)
-                    )
-                    self._logger.video("train_openl", to_np(openl))
-                    self._logger.scalar("Sac_MSE", mse)
-                    self._logger.add_figure("SCT", fig)
-                self._logger.write(fps=True)
+            if self._config.saccade_evaluation and self._should_saccade_eval(step):
+                self.saccade_evaluation()
+            self._logger.write(fps=True)
 
         policy_output, state = self._policy(obs, state, training)
 

@@ -313,7 +313,7 @@ debug:
   debug: True
   pretrain: 1
   prefill: 1
-  envs: 10
+  envs: 4
   num_steps: 20
   device: 'cpu'
   parallel: False

@@ -126,14 +126,16 @@ class Dreamer(nn.Module):
             sct_buf.append(sct)
 
         sct = torch.stack(sct_buf)
+        sct_std = torch.std(sct, 0).cpu()
         sct = torch.mean(sct, 0).cpu()
         mse = torch.mean(sct)
+        xs = range(len(sct))
         fig = plt.figure()
         plt.plot(sct)
+        plt.fill_between(xs, sct + sct_std, sct - sct_std, facecolor="blue", alpha=0.5)
         plt.title(f"Scene Convergence Time at {self._step}")
         self.sct_history[self._step] = sct
         sct_history_fig = plt.figure()
-        xs = range(len(sct))
         for name, value in self.sct_history.items():
             plt.plot(xs, value, label=name)
         plt.legend()

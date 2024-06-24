@@ -13,7 +13,7 @@ defaults:
   eval_every: 0
   eval_episode_num: 10
   log_every: 10000
-  saccade_eval_every: 100000
+  saccade_eval_every: 50000
   reset_every: 0
   device: 'cuda:0'
   compile: True

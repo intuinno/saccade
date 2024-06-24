@@ -96,101 +96,6 @@ defaults:
   disag_units: 400
   disag_action_cond: False
 
-dmc_proprio:
-  steps: 5e5
-  action_repeat: 2
-  envs: 4
-  train_ratio: 512
-  video_pred_log: false
-  encoder: {mlp_keys: '.*', cnn_keys: '$^'}
-  decoder: {mlp_keys: '.*', cnn_keys: '$^'}
-
-dmc_vision:
-  steps: 1e6
-  action_repeat: 2
-  envs: 4
-  train_ratio: 512
-  video_pred_log: true
-  encoder: {mlp_keys: '$^', cnn_keys: 'image'}
-  decoder: {mlp_keys: '$^', cnn_keys: 'image'}
-
-crafter:
-  task: crafter_reward
-  step: 1e6
-  action_repeat: 1
-  envs: 1
-  train_ratio: 512
-  video_pred_log: true
-  dyn_hidden: 1024
-  dyn_deter: 4096
-  units: 1024
-  encoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
-  decoder: {mlp_keys: '$^', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
-  value: {layers: 5}
-  reward_head: {layers: 5}
-  cont_head: {layers: 5}
-  imag_gradient: 'reinforce'
-  expl_behavior: 'plan2explore'
-  expl_until: 10000000000000000
-  expl_extr_scale: 0.0
-  expl_intr_scale: 1.0
-  disag_target: 'stoch'
-  disag_log: True
-  disag_models: 10
-  disag_offset: 1
-  disag_layers: 4
-  disag_units: 400
-  disag_action_cond: True
-
-
-atari100k:
-  steps: 4e5
-  envs: 1
-  action_repeat: 4
-  train_ratio: 1024
-  video_pred_log: true
-  eval_episode_num: 100
-  actor: {dist: 'onehot', std: 'none'}
-  imag_gradient: 'reinforce'
-  stickey: False
-  lives: unused
-  noops: 30
-  resize: opencv
-  actions: needed
-  time_limit: 108000
-
-minecraft:
-  task: minecraft_diamond
-  step: 1e8
-  parallel: True
-  envs: 16
-  # no eval
-  eval_episode_num: 0
-  eval_every: 1e4
-  action_repeat: 1
-  train_ratio: 16
-  video_pred_log: true
-  dyn_hidden: 1024
-  dyn_deter: 4096
-  units: 1024
-  encoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath|obs_reward', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
-  decoder: {mlp_keys: 'inventory|inventory_max|equipped|health|hunger|breath', cnn_keys: 'image', cnn_depth: 96, mlp_layers: 5, mlp_units: 1024}
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
-  value: {layers: 5}
-  reward_head: {layers: 5}
-  cont_head: {layers: 5}
-  imag_gradient: 'reinforce'
-  break_speed: 100.0
-  time_limit: 36000
-
-memorymaze:
-  steps: 1e8
-  action_repeat: 2
-  actor: {dist: 'onehot', std: 'none'}
-  imag_gradient: 'reinforce'
-  task: 'memorymaze_9x9'
-
 sac-004-rev2:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
@@ -315,7 +220,34 @@ sac-010-rev1:
   exp_name: 'sac-010-rev1'
   compile: True
 
-sac-010-rev1-Plan2Explore:
+sac-010-rev2-random:
+  task: 'saccade_MMNIST'
+  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
+  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
+  envs: 32
+  batch_size: 512
+  eval_envs: 512
+  # Environment
+  num_loc_per_side: 4
+  parallel: False
+    # Exploration
+  expl_behavior: 'random'
+  expl_until: 10000000000000000
+  expl_extr_scale: 0.0
+  expl_intr_scale: 1.0
+  disag_target: 'stoch'
+  disag_log: True
+  disag_models: 10
+  disag_offset: 1
+  disag_layers: 4
+  disag_units: 400
+  disag_action_cond: True
+  actor: {layers: 5, dist: 'onehot', std: 'none'}
+  saccade_evaluation: True
+  exp_name: 'sac-010-rev2-random'
+  compile: True
+
+sac-010-rev2-p2e:
   task: 'saccade_MMNIST'
   encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
   decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
@@ -339,16 +271,20 @@ sac-010-rev1-Plan2Explore:
   disag_action_cond: True
   actor: {layers: 5, dist: 'onehot', std: 'none'}
   saccade_evaluation: True
-  exp_name: 'sac-010-rev1-Plan2Explore'
+  exp_name: 'sac-010-rev2-p2e'
   compile: True
 
 debug:
   debug: True
   pretrain: 1
-  prefill: 1
+  prefill: 1000
   envs: 4
-  eval_envs: 128
+  eval_envs: 32
   num_steps: 20
   device: 'cpu'
   parallel: False
   exp_name: 'debug-'
+  compile: False
+  total_eval_envs: 128
+  saccade_eval_every: 128
+  train_ratio: 64

@@ -70,6 +70,7 @@ class Dreamer(nn.Module):
         self._metrics = {}
         # this is update step
         self._step = logger.step // config.action_repeat
+        self.sct_history = {}
         self._update_count = 0
         self._dataset = dataset
         self._envs = envs
@@ -125,15 +126,24 @@ class Dreamer(nn.Module):
             sct_buf.append(sct)
 
         sct = torch.stack(sct_buf)
-        sct = torch.mean(sct, 0)
+        sct = torch.mean(sct, 0).cpu()
         mse = torch.mean(sct)
         fig = plt.figure()
-        plt.plot(sct.cpu())
-        plt.title("Scene Convergence Time")
+        plt.plot(sct)
+        plt.title(f"Scene Convergence Time at {self._step}")
+        self.sct_history[self._step] = sct
+        sct_history_fig = plt.figure()
+        xs = range(len(sct))
+        for name, value in self.sct_history.items():
+            plt.plot(xs, value, label=name)
+        plt.legend()
+        plt.title("Scene Convergence Times")
 
         self._logger.video("train_openl", to_np(openl))
         self._logger.scalar("Sac_MSE", mse)
         self._logger.add_figure("SCT", fig)
+        self._logger.add_figure("SCT_History", sct_history_fig)
+        self._logger.save_dict("sct_history", self.sct_history)
 
     def estimate_state(self, state, action, obs):
         obs = self._wm.preprocess(obs)

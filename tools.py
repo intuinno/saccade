@@ -7,7 +7,7 @@ import pathlib
 import re
 import time
 import random
-
+import pickle
 import numpy as np
 
 import torch
@@ -76,6 +76,11 @@ class Logger:
 
     def add_figure(self, name, value):
         self._writer.add_figure(name, value, self.step)
+
+    def save_dict(self, name, value):
+        with (self._logdir / f"{name}_{self.step}").open("wb") as f:
+            pickle.dump(value, f)
+            print(f"{name} saved successfully to file")
 
     def write(self, fps=False, step=False):
         if not step:

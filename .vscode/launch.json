@@ -19,9 +19,9 @@
       "console": "integratedTerminal",
       "justMyCode": true, 
       "args": [
-          "--configs", "sac-010-rev1", 
-          "--device", "cuda:0",
-          "--load_model", "./models/sac-008-rev0-1M.pt",
+          "--configs", "sac-010-rev1-Plan2Explore", "debug", 
+          // "--device", "cuda:0",
+          // "--load_model", "./models/sac-008-rev0-1M.pt",
           // "--logdir", "./logs/debug"
           // "--debug", "True",
       ],

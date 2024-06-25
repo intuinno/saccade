@@ -8,7 +8,7 @@ defaults:
   offline_evaldir: ''
   seed: 0
   deterministic_run: False
-  steps: 1e6
+  steps: 1e9
   parallel: True
   eval_every: 0
   eval_episode_num: 10

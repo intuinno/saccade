@@ -1,28 +1,27 @@
 defaults:
+  envs: 8
+  num_loc_per_side: 4
+  intrinsic_reward: 'none'
+  batch_size: 512
+  eval_batch_size: 512
   exp_name: 'default'
   logdir: 'logs'
   load_model: ''
   traindir: null
-  evaldir: null
   offline_traindir: ''
-  offline_evaldir: ''
   seed: 0
   deterministic_run: False
   steps: 1e9
-  parallel: True
-  eval_every: 0
-  eval_episode_num: 10
+  eval_every: 50000
   log_every: 10000
-  saccade_eval_every: 50000
   reset_every: 0
   device: 'cuda:0'
   compile: True
   precision: 32
   debug: False
-  saccade_evaluation: True
 
   # Environment
-  task: 'dmc_walker_walk'
+  task: 'saccade_MMNIST'
   size: [64, 64]
   action_repeat: 1
   time_limit: 1000
@@ -44,11 +43,11 @@ defaults:
   act: 'SiLU'
   norm: True
   encoder:
-    {mlp_keys: '$^', cnn_keys: 'image', act: 'SiLU', norm: True, cnn_depth: 32, kernel_size: 4, minres: 4, mlp_layers: 5, mlp_units: 1024, symlog_inputs: True}
+    {mlp_keys: 'central|peripheral', cnn_keys: '$^', act: 'SiLU', norm: True, cnn_depth: 32, kernel_size: 4, minres: 4, mlp_layers: 5, mlp_units: 1024, symlog_inputs: True}
   decoder:
-    {mlp_keys: '$^', cnn_keys: 'image', act: 'SiLU', norm: True, cnn_depth: 32, kernel_size: 4, minres: 4, mlp_layers: 5, mlp_units: 1024, cnn_sigmoid: False, image_dist: mse, vector_dist: symlog_mse, outscale: 1.0}
+    {mlp_keys: 'central|peripheral', cnn_keys: '$^', act: 'SiLU', norm: True, cnn_depth: 32, kernel_size: 4, minres: 4, mlp_layers: 5, mlp_units: 1024, cnn_sigmoid: False, image_dist: mse, vector_dist: symlog_mse, outscale: 1.0}
   actor:
-    {layers: 2, dist: 'normal', entropy: 3e-4, unimix_ratio: 0.01, std: 'learned', min_std: 0.1, max_std: 1.0, temp: 0.1, lr: 3e-5, eps: 1e-5, grad_clip: 100.0, outscale: 1.0}
+    {layers: 3, dist: 'onehot', entropy: 3e-4, unimix_ratio: 0.01, std: 'none', min_std: 0.1, max_std: 1.0, temp: 0.1, lr: 3e-5, eps: 1e-5, grad_clip: 100.0, outscale: 1.0}
   critic:
     {layers: 2, dist: 'symlog_disc', slow_target: True, slow_target_update: 1, slow_target_fraction: 0.02, lr: 3e-5, eps: 1e-5, grad_clip: 100.0, outscale: 0.0}
   reward_head:
@@ -63,10 +62,8 @@ defaults:
   initial: 'learned'
 
   # Training
-  envs: 16
-  eval_envs: 16
-  total_eval_envs: 10240
-  num_steps: 64
+  total_eval_batch_size: 10240
+  batch_length: 64
   train_ratio: 512
   pretrain: 100
   model_lr: 1e-4
@@ -96,195 +93,22 @@ defaults:
   disag_units: 400
   disag_action_cond: False
 
-sac-004-rev2:
-  task: 'saccade_MMNIST'
-  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 64
-  # Environment
-  num_loc_per_side: 4
-    # Exploration
-  expl_behavior: 'plan2explore'
-  expl_until: 10000000000000000
-  expl_extr_scale: 0.0
-  expl_intr_scale: 1.0
-  disag_target: 'stoch'
-  disag_log: True
-  disag_models: 10
-  disag_offset: 1
-  disag_layers: 4
-  disag_units: 400
-  disag_action_cond: True
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
-  video_pred_log: True
-  exp_name: 'sac-004-rev2'
 
-sac-004-rev3:
-  task: 'saccade_MMNIST'
-  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 64
-  # Environment
-  num_loc_per_side: 7
-    # Exploration
-  expl_behavior: 'plan2explore'
-  expl_until: 10000000000000000
-  expl_extr_scale: 0.0
-  expl_intr_scale: 1.0
-  disag_target: 'stoch'
-  disag_log: True
-  disag_models: 10
-  disag_offset: 1
-  disag_layers: 4
-  disag_units: 400
-  disag_action_cond: True
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
-  video_pred_log: True
-  exp_name: 'sac-004-rev2'
-  
-  
-sac-004-rev4:
-  task: 'saccade_MMNIST'
-  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 64
-  # Environment
-  num_loc_per_side: 4
-  parallel: False
-    # Exploration
-  expl_behavior: 'plan2explore'
-  expl_until: 10000000000000000
-  expl_extr_scale: 0.0
-  expl_intr_scale: 1.0
-  disag_target: 'stoch'
-  disag_log: True
-  disag_models: 10
-  disag_offset: 1
-  disag_layers: 4
-  disag_units: 400
-  disag_action_cond: True
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
-  video_pred_log: True
-  exp_name: 'sac-004-rev4'
-  
-   
-sac-004-rev6:
-  task: 'saccade_MMNIST'
-  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 64
-  # Environment
-  num_loc_per_side: 4
-  parallel: False
-    # Exploration
-  expl_behavior: 'random'
-  expl_until: 10000000000000000
-  expl_extr_scale: 0.0
-  expl_intr_scale: 1.0
-  disag_target: 'stoch'
-  disag_log: True
-  disag_models: 10
-  disag_offset: 1
-  disag_layers: 4
-  disag_units: 400
-  disag_action_cond: True
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
-  video_pred_log: True
-  exp_name: 'sac-004-rev6'
-
-
-sac-010-rev1:
-  task: 'saccade_MMNIST'
-  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 32
-  batch_size: 512
-  eval_envs: 512
-  # Environment
-  num_loc_per_side: 4
-  parallel: False
-    # Exploration
-  expl_behavior: 'random'
-  expl_until: 10000000000000000
-  expl_extr_scale: 0.0
-  expl_intr_scale: 1.0
-  disag_target: 'stoch'
-  disag_log: True
-  disag_models: 10
-  disag_offset: 1
-  disag_layers: 4
-  disag_units: 400
-  disag_action_cond: True
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
-  saccade_evaluation: True
-  exp_name: 'sac-010-rev1'
-  compile: True
-
-sac-010-rev2-random:
-  task: 'saccade_MMNIST'
-  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 32
-  batch_size: 512
-  eval_envs: 512
-  # Environment
-  num_loc_per_side: 4
-  parallel: False
-    # Exploration
-  expl_behavior: 'random'
-  expl_until: 10000000000000000
-  expl_extr_scale: 0.0
-  expl_intr_scale: 1.0
-  disag_target: 'stoch'
-  disag_log: True
-  disag_models: 10
-  disag_offset: 1
-  disag_layers: 4
-  disag_units: 400
-  disag_action_cond: True
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
-  saccade_evaluation: True
-  exp_name: 'sac-010-rev2-random'
-  compile: True
-
-sac-010-rev2-p2e:
-  task: 'saccade_MMNIST'
-  encoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  decoder: {mlp_keys: 'central|peripheral', cnn_keys: '$^'}
-  envs: 32
-  batch_size: 512
-  eval_envs: 512
-  # Environment
-  num_loc_per_side: 4
-  parallel: False
-    # Exploration
-  expl_behavior: 'plan2explore'
-  expl_until: 10000000000000000
-  expl_extr_scale: 0.0
-  expl_intr_scale: 1.0
-  disag_target: 'stoch'
-  disag_log: True
-  disag_models: 10
-  disag_offset: 1
-  disag_layers: 4
-  disag_units: 400
-  disag_action_cond: True
-  actor: {layers: 5, dist: 'onehot', std: 'none'}
-  saccade_evaluation: True
-  exp_name: 'sac-010-rev2-p2e'
-  compile: True
+sac-011-rev0:
+  exp_name: 'sac-011-rev0'
+  intrinsic_reward: 'prediction_error'
 
 debug:
   debug: True
   pretrain: 1
   prefill: 1000
-  envs: 4
-  eval_envs: 32
-  num_steps: 20
+  batch_size: 4
+  eval_batch_size: 8
+  batch_length: 20
   device: 'cpu'
   parallel: False
   exp_name: 'debug-'
   compile: False
-  total_eval_envs: 128
-  saccade_eval_every: 128
+  total_eval_batch_size: 128
+  eval_every: 128
   train_ratio: 64

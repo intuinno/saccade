@@ -61,8 +61,8 @@ class Dreamer(nn.Module):
         self._config = config
         self._logger = logger
         self._should_log = tools.Every(config.log_every)
-        self._should_saccade_eval = tools.Every(config.saccade_eval_every)
-        batch_steps = config.envs * config.num_steps
+        self._should_eval = tools.Every(config.eval_every)
+        batch_steps = config.batch_size * config.batch_length
         self._should_train = tools.Every(batch_steps / config.train_ratio)
         self._should_pretrain = tools.Once()
         self._should_reset = tools.Every(config.reset_every)
@@ -75,15 +75,15 @@ class Dreamer(nn.Module):
         self._dataset = dataset
         self._envs = envs
         self._wm = models.WorldModel(obs_space, act_space, self._step, config)
-        # self._task_behavior = models.ImagBehavior(config, self._wm)
+        self._task_behavior = models.ImagBehavior(config, self._wm)
         if (
             config.compile and os.name != "nt"
         ):  # compilation is not supported on windows
             self._wm = torch.compile(self._wm)
-            # self._task_behavior = torch.compile(self._task_behavior)
+            self._task_behavior = torch.compile(self._task_behavior)
         reward = lambda f, s, a: self._wm.heads["reward"](f).mean()
         self._expl_behavior = dict(
-            # greedy=lambda: self._task_behavior,
+            greedy=lambda: self._task_behavior,
             random=lambda: expl.Random(config, act_space),
             plan2explore=lambda: expl.Plan2Explore(config, self._wm, reward),
         )[config.expl_behavior]().to(self._config.device)
@@ -93,7 +93,7 @@ class Dreamer(nn.Module):
         buffer = {}
         state = None
 
-        for i in range(self._config.num_steps):
+        for i in range(self._config.batch_length):
             policy_output, state = self._policy(obs, state, training)
             obs, reward, done, info = self._envs.step(policy_output["action"])
             append_buffer(
@@ -120,7 +120,7 @@ class Dreamer(nn.Module):
 
     def saccade_evaluation(self):
         sct_buf = []
-        epochs = self._config.total_eval_envs // self._config.eval_envs
+        epochs = self._config.total_eval_batch_size // self._config.eval_batch_size
         for i in range(epochs):
             openl, sct = self._wm.saccade_video_pred(self.get_batch(training=False))
             sct_buf.append(sct)
@@ -160,6 +160,17 @@ class Dreamer(nn.Module):
         reward = 0.5 * (recon - batch["obs"]["central"]) ** 2
         return torch.mean(reward, 2)
 
+    def intrinsic_reward(self, obs, state):
+        latent, action = state
+        obs = self._wm.preprocess(obs)
+        embed = self._wm.encoder(obs)
+        post, prior = self._wm.dynamics.obs_step(latent, action, embed, obs["is_first"])
+        feat = self._wm.dynamics.get_feat(prior)
+        recon = self._wm.heads["decoder"](feat)["central"].mode()
+        reward = 0.5 * (recon - obs["central"]) ** 2
+        reward = torch.mean(reward, dim=1)
+        return reward.detach().numpy()
+
     def __call__(self, obs, reset, state=None, training=True):
         step = self._step
         if training:
@@ -176,7 +187,7 @@ class Dreamer(nn.Module):
                 for name, values in self._metrics.items():
                     self._logger.scalar(name, float(np.mean(values)))
                     self._metrics[name] = []
-            if self._config.saccade_evaluation and self._should_saccade_eval(step):
+            if self._should_eval(step):
                 self.saccade_evaluation()
             self._logger.write(fps=True)
 
@@ -198,16 +209,16 @@ class Dreamer(nn.Module):
         if self._config.eval_state_mean:
             latent["stoch"] = latent["mean"]
         feat = self._wm.dynamics.get_feat(latent)
-        # if not training:
-        # actor = self._task_behavior.actor(feat)
-        # action = actor.mode()
-        if self._should_expl(self._step):
+        if not training:
+            actor = self._task_behavior.actor(feat)
+            action = actor.mode()
+        elif self._should_expl(self._step):
             actor = self._expl_behavior.actor(feat)
             action = actor.sample()
         else:
-            raise NotImplementedError(self._policy)
-            # actor = self._task_behavior.actor(feat)
-            # action = actor.sample()
+            # raise NotImplementedError(self._policy)
+            actor = self._task_behavior.actor(feat)
+            action = actor.sample()
         logprob = actor.log_prob(action)
         latent = {k: v.detach() for k, v in latent.items()}
         action = action.detach()
@@ -227,7 +238,7 @@ class Dreamer(nn.Module):
         reward = lambda f, s, a: self._wm.heads["reward"](
             self._wm.dynamics.get_feat(s)
         ).mode()
-        # metrics.update(self._task_behavior._train(start, reward)[-1])
+        metrics.update(self._task_behavior._train(start, reward)[-1])
         if self._config.expl_behavior != "greedy":
             mets = self._expl_behavior.train(start, context, data)[-1]
             metrics.update({"expl_" + key: value for key, value in mets.items()})
@@ -243,8 +254,8 @@ def count_steps(folder):
 
 
 def make_dataset(episodes, config):
-    generator = tools.sample_episodes(episodes, config.num_steps)
-    dataset = tools.from_generator(generator, config.envs)
+    generator = tools.sample_episodes(episodes, config.batch_length)
+    dataset = tools.from_generator(generator, config.batch_size)
     return dataset
 
 
@@ -321,7 +332,6 @@ def main(config):
     tools.set_seed_everywhere(config.seed)
     if config.deterministic_run:
         tools.enable_deterministic_run()
-    # logdir = pathlib.Path(config.logdir).expanduser()
     rootdir = pathlib.Path(sys.argv[0]).parent
     tz = pytz.timezone("US/Pacific")
     now = datetime.now(tz)
@@ -330,7 +340,6 @@ def main(config):
     exp_name += date_time
     logdir = rootdir / config.logdir / exp_name
     config.traindir = config.traindir or logdir / "train_eps"
-    config.evaldir = config.evaldir or logdir / "eval_eps"
     config.steps //= config.action_repeat
     config.eval_every //= config.action_repeat
     config.log_every //= config.action_repeat
@@ -339,7 +348,6 @@ def main(config):
     print("Logdir", logdir)
     logdir.mkdir(parents=True, exist_ok=True)
     config.traindir.mkdir(parents=True, exist_ok=True)
-    config.evaldir.mkdir(parents=True, exist_ok=True)
     step = count_steps(config.traindir)
     # step in logger is environmental step
     logger = tools.Logger(logdir, config.action_repeat * step)
@@ -350,24 +358,25 @@ def main(config):
     else:
         directory = config.traindir
     train_eps = tools.load_episodes(directory, limit=config.dataset_size)
-    if config.offline_evaldir:
-        directory = config.offline_evaldir.format(**vars(config))
-    else:
-        directory = config.evaldir
-    eval_eps = tools.load_episodes(directory, limit=1)
+
     make = lambda mode, id: make_env(config, mode, id)
     train_envs = [make("train", i) for i in range(config.envs)]
-    eval_envs = [make("eval", i) for i in range(config.envs)]
     if config.parallel:
         train_envs = [Parallel(env, "process") for env in train_envs]
-        eval_envs = [Parallel(env, "process") for env in eval_envs]
     else:
         train_envs = [Damy(env) for env in train_envs]
-        eval_envs = [Damy(env) for env in eval_envs]
-    vec_envs = VecSaccadeEnvAdapter(config.eval_envs, config)
+    vec_envs = VecSaccadeEnvAdapter(config.eval_batch_size, config)
     acts = train_envs[0].action_space
     print("Action Space", acts)
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
+
+    # Save experiment hyperparameters
+    config_backup = argparse.Namespace(**vars(config))
+    config_backup.traindir = str(config.traindir)
+    yaml = YAML(typ="safe")
+    yaml.default_flow_style = False
+    with open(logdir / "config.yml", "w") as f:
+        yaml.dump(vars(config_backup), f)
 
     state = None
     if not config.offline_traindir:
@@ -405,7 +414,6 @@ def main(config):
 
     print("Simulate agent.")
     train_dataset = make_dataset(train_eps, config)
-    eval_dataset = make_dataset(eval_eps, config)
     agent = Dreamer(
         train_envs[0].observation_space,
         train_envs[0].action_space,
@@ -424,21 +432,7 @@ def main(config):
     # make sure eval will be executed once after config.steps
     while agent._step < config.steps + config.eval_every:
         logger.write()
-        if config.eval_every > 0 and config.eval_episode_num > 0:
-            print("Start evaluation.")
-            eval_policy = functools.partial(agent, training=False)
-            tools.simulate(
-                eval_policy,
-                eval_envs,
-                eval_eps,
-                config.evaldir,
-                logger,
-                is_eval=True,
-                episodes=config.eval_episode_num,
-            )
-            if config.video_pred_log:
-                video_pred = agent._wm.video_pred(next(eval_dataset))
-                logger.video("eval_openl", to_np(video_pred))
+
         print("Start training.")
         state = tools.simulate(
             agent,
@@ -447,8 +441,9 @@ def main(config):
             config.traindir,
             logger,
             limit=config.dataset_size,
-            steps=10000,
+            steps=config.eval_every,
             state=state,
+            intrinsic_reward=config.intrinsic_reward,
         )
         items_to_save = {
             "agent_state_dict": agent.state_dict(),

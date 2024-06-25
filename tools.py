@@ -144,6 +144,7 @@ def simulate(
     steps=0,
     episodes=0,
     state=None,
+    intrinsic_reward=None,
 ):
     # initialize or unpack simulation state
     if state is None:
@@ -186,6 +187,7 @@ def simulate(
         results = [e.step(a) for e, a in zip(envs, action)]
         results = [r() for r in results]
         obs, reward, done = zip(*[p[:3] for p in results])
+
         obs = list(obs)
         reward = list(reward)
         done = np.stack(done)
@@ -193,8 +195,19 @@ def simulate(
         length += 1
         step += len(envs)
         length *= 1 - done
+        if intrinsic_reward == "prediction_error":
+            obs_copy = obs.copy()
+            obs_copy = {
+                k: np.stack([o[k] for o in obs_copy])
+                for k in obs_copy[0]
+                if "log_" not in k
+            }
+            i_reward = agent.intrinsic_reward(obs_copy, agent_state)
+        else:
+            i_reward = [0] * len(envs)
+
         # add to cache
-        for a, result, env in zip(action, results, envs):
+        for a, result, env, ir in zip(action, results, envs, i_reward):
             o, r, d, info = result
             o = {k: convert(v) for k, v in o.items()}
             transition = o.copy()
@@ -202,7 +215,10 @@ def simulate(
                 transition.update(a)
             else:
                 transition["action"] = a
-            transition["reward"] = r
+            if intrinsic_reward == "prediction_error":
+                transition["reward"] = ir
+            else:
+                transition["reward"] = r
             transition["discount"] = info.get("discount", np.array(1 - float(d)))
             add_to_cache(cache, env.id, transition)
 

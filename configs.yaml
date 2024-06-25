@@ -1,8 +1,9 @@
 defaults:
   envs: 8
+  parallel: True
   num_loc_per_side: 4
   intrinsic_reward: 'none'
-  batch_size: 512
+  batch_size: 128
   eval_batch_size: 512
   exp_name: 'default'
   logdir: 'logs'

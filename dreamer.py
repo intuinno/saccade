@@ -169,7 +169,7 @@ class Dreamer(nn.Module):
         recon = self._wm.heads["decoder"](feat)["central"].mode()
         reward = 0.5 * (recon - obs["central"]) ** 2
         reward = torch.mean(reward, dim=1)
-        return reward.detach().numpy()
+        return reward.detach().cpu().numpy()
 
     def __call__(self, obs, reset, state=None, training=True):
         step = self._step

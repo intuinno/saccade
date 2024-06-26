@@ -44,6 +44,15 @@ def append_buffer(buffer, item):
             buffer[key].append(val)
 
 
+def build_batch_behavior(buffer):
+    for key, val in buffer.items():
+        if isinstance(val, dict):
+            buffer[key] = build_batch_behavior(buffer[key])
+        else:
+            buffer[key] = torch.stack(buffer[key])
+    return buffer
+
+
 def build_batch(buffer):
     for key, val in buffer.items():
         if isinstance(val, dict):
@@ -78,7 +87,7 @@ class Dreamer(nn.Module):
         if config.behavior == "imagine_AC":
             self._task_behavior = models.ImagBehavior(config, self._wm)
         elif config.behavior == "vanilla_AC":
-            self._task_behavior = models.ACBehavior(config, envs)
+            self._task_behavior = models.ACBehavior(config)
         elif config.behavior == "random":
             self._task_behavior = models.SaccadeRandomBehavior(config, act_space)
         else:
@@ -124,8 +133,35 @@ class Dreamer(nn.Module):
         batch = build_batch(buffer)
         return batch
 
+    def get_batch_behavior(self, training=True):
+        obs = self._envs.reset()
+        buffer = {}
+        state = None
+
+        for i in range(self._config.batch_length):
+            policy_output, state = self._policy(obs, state, training)
+            obs, reward, done, info = self._envs.step(policy_output["action"])
+            append_buffer(
+                buffer,
+                {
+                    "central": obs["central"],
+                    "peripheral": obs["peripheral"],
+                    "is_first": obs["is_first"],
+                    "is_last": obs["is_last"],
+                    "is_terminal": obs["is_terminal"],
+                    "GT": obs["GT"],
+                    "reward": reward,
+                    "discount": 1.0 - done,
+                    "action": policy_output["action"],
+                    "logprob": policy_output["logprob"],
+                },
+            )
+        batch = build_batch(buffer)
+        return batch
+
     def get_init_wm_state(self):
         init_state = self._wm.dynamics.initial(self._config.envs)
+        init_state["feat"] = self._wm.dynamics.get_feat(init_state)
         return init_state
 
     def saccade_evaluation(self):
@@ -165,10 +201,13 @@ class Dreamer(nn.Module):
         prior["feat"] = self._wm.dynamics.get_feat(prior)
         return post, prior
 
-    def calculate_reward(self, batch, method="prediction"):
-        recon = self._wm.heads["decoder"](batch["prior"]["feat"])["central"].mode()
-        reward = 0.5 * (recon - batch["obs"]["central"]) ** 2
-        return torch.mean(reward, 2)
+    def calculate_reward(self, batch):
+        if self._config.intrinsic_reward == "prediction_error":
+            recon = self._wm.heads["decoder"](batch["prior"]["feat"])["central"].mode()
+            reward = 0.5 * (recon - batch["obs"]["central"]) ** 2
+            return torch.mean(reward, 2)
+        else:
+            raise NotImplementedError(self._config.intrinsic_reward)
 
     def intrinsic_reward(self, obs, state):
         latent, action = state
@@ -240,6 +279,44 @@ class Dreamer(nn.Module):
         state = (latent, action)
         return policy_output, state
 
+    def get_action(self, state):
+        feat = self._wm.dynamics.get_feat(state).detach()
+        actor = self._task_behavior.actor(feat)
+        action = actor.sample()
+        logprob = actor.log_prob(action)
+        actor_ent = actor.entropy()
+        return action, logprob, actor_ent
+
+    def behavior_train(self):
+        _ = self._envs.reset()
+        init_state = self.get_init_wm_state()
+        state = init_state
+
+        with tools.RequiresGrad(self._task_behavior):
+            with torch.cuda.amp.autocast(self._config.use_amp):
+                buffer = {}
+                for j in range(self._config.batch_length):
+                    action, logprob, actor_ent = self.get_action(state)
+                    obs, _, _, _ = self._envs.step(action)
+                    post, prior = self.estimate_state(state, action, obs)
+                    state = post
+                    append_buffer(
+                        buffer,
+                        {
+                            "post": post,
+                            "prior": prior,
+                            "action": action,
+                            "logprob": logprob,
+                            "actor_ent": actor_ent,
+                            "obs": obs,
+                        },
+                    )
+                batch = build_batch_behavior(buffer)
+                batch["reward"] = self.calculate_reward(batch)
+                batch["init_state"] = init_state
+                met = self._task_behavior._train(batch)
+        return met
+
     def _train(self, data):
         metrics = {}
         post, context, mets = self._wm._train(data)
@@ -252,7 +329,7 @@ class Dreamer(nn.Module):
             ).mode()
             metrics.update(self._task_behavior._train(start, reward)[-1])
         elif self._config.behavior == "vanilla_AC":
-            metrics.update(self._task_behavior._train(self.get_batch(training=True)))
+            metrics.update(self.behavior_train())
         elif self._config.behavior == "random":
             pass
         else:
@@ -363,6 +440,7 @@ def main(config):
     config.eval_every //= config.action_repeat
     config.log_every //= config.action_repeat
     config.time_limit //= config.action_repeat
+    config.use_amp = True if config.precision == 16 else False
 
     print("Logdir", logdir)
     logdir.mkdir(parents=True, exist_ok=True)

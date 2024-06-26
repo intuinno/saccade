@@ -75,7 +75,7 @@ defaults:
   opt: 'adam'
 
   # Behavior.
-  discount: 0.997
+  discount_gamma: 0.997
   discount_lambda: 0.95
   imag_horizon: 15
   imag_gradient: 'dynamics'

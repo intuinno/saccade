@@ -181,7 +181,7 @@ class WorldModel(nn.Module):
         if "image" in obs:
             obs["image"] = torch.Tensor(obs["image"]) / 255.0
         if "discount" in obs:
-            obs["discount"] *= self._config.discount
+            obs["discount"] *= self._config.discount_gamma
             # (batch_size, batch_length) -> (batch_size, batch_length, 1)
             obs["discount"] = torch.Tensor(obs["discount"]).unsqueeze(-1)
         # 'is_first' is necesarry to initialize hidden state at training
@@ -588,6 +588,7 @@ class ACBehavior(nn.Module):
         self,
         batch,
     ):
+        # batch = [T, B ...]
         self._update_slow_target()
         metrics = {}
 

@@ -747,7 +747,7 @@ class Optimizer:
         }[opt]()
         self._scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
-    def __call__(self, loss, params, retain_graph=True):
+    def __call__(self, loss, params, retain_graph=False):
         assert len(loss.shape) == 0, loss.shape
         metrics = {}
         metrics[f"{self._name}_loss"] = loss.detach().cpu().numpy()

@@ -96,7 +96,7 @@ sac-009-rev0:
   exp_name: 'sac-009-rev0'
   # Environment
   num_loc_per_side: 4
-  behavior: 'random'
+  behavior: 'ac'
 
 debug:
   debug: True

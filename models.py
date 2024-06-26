@@ -1,6 +1,7 @@
 import copy
 import torch
 from torch import nn
+from torch import distributions as torchd
 import einops
 
 import networks
@@ -512,3 +513,176 @@ class ImagBehavior(nn.Module):
                 for s, d in zip(self.value.parameters(), self._slow_value.parameters()):
                     d.data = mix * s.data + (1 - mix) * d.data
             self._updates += 1
+
+
+class ACBehavior(nn.Module):
+    def __init__(self, config):
+        super(ACBehavior, self).__init__()
+        self._use_amp = True if config.precision == 16 else False
+        self._config = config
+        if config.dyn_discrete:
+            feat_size = config.dyn_stoch * config.dyn_discrete + config.dyn_deter
+        else:
+            feat_size = config.dyn_stoch + config.dyn_deter
+        self.actor = networks.MLP(
+            feat_size,
+            (config.num_actions,),
+            config.actor["layers"],
+            config.units,
+            config.act,
+            config.norm,
+            config.actor["dist"],
+            config.actor["std"],
+            config.actor["min_std"],
+            config.actor["max_std"],
+            absmax=1.0,
+            temp=config.actor["temp"],
+            unimix_ratio=config.actor["unimix_ratio"],
+            outscale=config.actor["outscale"],
+            name="Actor",
+        )
+        self.value = networks.MLP(
+            feat_size,
+            (255,) if config.critic["dist"] == "symlog_disc" else (),
+            config.critic["layers"],
+            config.units,
+            config.act,
+            config.norm,
+            config.critic["dist"],
+            outscale=config.critic["outscale"],
+            device=config.device,
+            name="Value",
+        )
+        if config.critic["slow_target"]:
+            self._slow_value = copy.deepcopy(self.value)
+            self._updates = 0
+        kw = dict(wd=config.weight_decay, opt=config.opt, use_amp=self._use_amp)
+        self._actor_opt = tools.Optimizer(
+            "actor",
+            self.actor.parameters(),
+            config.actor["lr"],
+            config.actor["eps"],
+            config.actor["grad_clip"],
+            **kw,
+        )
+        print(
+            f"Optimizer actor_opt has {sum(param.numel() for param in self.actor.parameters())} variables."
+        )
+        self._value_opt = tools.Optimizer(
+            "value",
+            self.value.parameters(),
+            config.critic["lr"],
+            config.critic["eps"],
+            config.critic["grad_clip"],
+            **kw,
+        )
+        print(
+            f"Optimizer value_opt has {sum(param.numel() for param in self.value.parameters())} variables."
+        )
+        if self._config.reward_EMA:
+            # register ema_vals to nn.Module for enabling torch.save and torch.load
+            self.register_buffer("ema_vals", torch.zeros((2,)).to(self._config.device))
+            self.reward_ema = RewardEMA(device=self._config.device)
+
+    def _train(
+        self,
+        batch,
+    ):
+        self._update_slow_target()
+        metrics = {}
+
+        # Actor update
+        lambda_returns = torch.empty_like(batch["reward"]).to(self._config.device)
+
+        feat = batch["post"]["feat"].detach()
+        shifted_feat = torch.cat(
+            [feat[:-1], torch.unsqueeze(batch["init_state"]["feat"], 0)]
+        )
+
+        critic = self._slow_value
+
+        slow_values = critic(feat).mode().squeeze()
+        shifted_values = critic(shifted_feat).mode().squeeze()
+
+        last_return = slow_values[-1]
+        for i in reversed(range(len(feat))):
+            new_return = batch["reward"][i] + self._config.discount_gamma * (
+                ((1 - self._config.discount_lambda) * slow_values[i])
+                + self._config.discount_lambda * last_return
+            )
+            lambda_returns[i] = new_return
+            last_return = new_return
+
+        actor_ent = batch["actor_ent"]
+        offset, scale = self.reward_ema(lambda_returns, self.ema_vals)
+        normed_target = (lambda_returns - offset) / scale
+        normed_base = (shifted_values - offset) / scale
+        adv = normed_target - normed_base
+        metrics.update(tools.tensorstats(normed_target, "normed_target"))
+        metrics["EMA_005"] = to_np(self.ema_vals[0])
+        metrics["EMA_095"] = to_np(self.ema_vals[1])
+
+        actor_loss = batch["logprob"] * adv.detach()
+        actor_loss -= self._config.actor["entropy"] * actor_ent
+        actor_loss = torch.mean(actor_loss)
+
+        # Critic update
+        value = self.value(shifted_feat.detach())
+        value_loss = -value.log_prob(lambda_returns.detach())
+        value_loss = torch.mean(value_loss)
+
+        metrics.update(tools.tensorstats(value.mode(), "value"))
+        metrics.update(tools.tensorstats(lambda_returns, "target"))
+        metrics.update(tools.tensorstats(batch["reward"], "batch_reward"))
+        if self._config.actor["dist"] in ["onehot"]:
+            metrics.update(
+                tools.tensorstats(
+                    torch.argmax(batch["action"], dim=-1).float(), "batch_action"
+                )
+            )
+        else:
+            metrics.update(tools.tensorstats(batch["action"], "batch_action"))
+        metrics["actor_entropy"] = to_np(torch.mean(actor_ent))
+        metrics.update(self._actor_opt(actor_loss, self.actor.parameters()))
+        metrics.update(
+            self._value_opt(value_loss, self.value.parameters(), retain_graph=False)
+        )
+        return metrics
+
+    def _update_slow_target(self):
+        if self._config.critic["slow_target"]:
+            if self._updates % self._config.critic["slow_target_update"] == 0:
+                mix = self._config.critic["slow_target_fraction"]
+                for s, d in zip(self.value.parameters(), self._slow_value.parameters()):
+                    d.data = mix * s.data + (1 - mix) * d.data
+            self._updates += 1
+
+
+class SaccadeRandomBehavior(nn.Module):
+    def __init__(self, config, act_space):
+        super(SaccadeRandomBehavior, self).__init__()
+        self._config = config
+        self._act_space = act_space
+
+    def actor(self, feat):
+        if self._config.actor["dist"] == "onehot":
+            return tools.OneHotDist(
+                torch.zeros(self._config.num_actions)
+                .repeat(self._config.envs, 1)
+                .to(self._config.device)
+            )
+        else:
+            return torchd.independent.Independent(
+                torchd.uniform.Uniform(
+                    torch.Tensor(self._act_space.low)
+                    .repeat(self._config.envs, 1)
+                    .to(self._config.device),
+                    torch.Tensor(self._act_space.high)
+                    .repeat(self._config.envs, 1)
+                    .to(self._config.device),
+                ),
+                1,
+            )
+
+    def _train(self, batch):
+        return {}

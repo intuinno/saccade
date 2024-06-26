@@ -75,12 +75,22 @@ class Dreamer(nn.Module):
         self._dataset = dataset
         self._envs = envs
         self._wm = models.WorldModel(obs_space, act_space, self._step, config)
-        self._task_behavior = models.ImagBehavior(config, self._wm)
+        if config.behavior == "imagine_AC":
+            self._task_behavior = models.ImagBehavior(config, self._wm)
+        elif config.behavior == "vanilla_AC":
+            self._task_behavior = models.ACBehavior(config, envs)
+        elif config.behavior == "random":
+            self._task_behavior = models.SaccadeRandomBehavior(config, act_space)
+        else:
+            raise NotImplementedError(config.behavior)
+
         if (
             config.compile and os.name != "nt"
         ):  # compilation is not supported on windows
             self._wm = torch.compile(self._wm)
             self._task_behavior = torch.compile(self._task_behavior)
+            self._envs = torch.compile(self._envs)
+
         reward = lambda f, s, a: self._wm.heads["reward"](f).mean()
         self._expl_behavior = dict(
             greedy=lambda: self._task_behavior,
@@ -235,10 +245,19 @@ class Dreamer(nn.Module):
         post, context, mets = self._wm._train(data)
         metrics.update(mets)
         start = post
-        reward = lambda f, s, a: self._wm.heads["reward"](
-            self._wm.dynamics.get_feat(s)
-        ).mode()
-        metrics.update(self._task_behavior._train(start, reward)[-1])
+
+        if self._config.behavior == "imagine_AC":
+            reward = lambda f, s, a: self._wm.heads["reward"](
+                self._wm.dynamics.get_feat(s)
+            ).mode()
+            metrics.update(self._task_behavior._train(start, reward)[-1])
+        elif self._config.behavior == "vanilla_AC":
+            metrics.update(self._task_behavior._train(self.get_batch(training=True)))
+        elif self._config.behavior == "random":
+            pass
+        else:
+            raise NotImplementedError(self._config.behavior)
+
         if self._config.expl_behavior != "greedy":
             mets = self._expl_behavior.train(start, context, data)[-1]
             metrics.update({"expl_" + key: value for key, value in mets.items()})

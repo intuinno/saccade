@@ -1,4 +1,5 @@
 defaults:
+  behavior: 'imagineAC' # vanilla_AC or imagine_AC
   envs: 8
   parallel: True
   num_loc_per_side: 4
@@ -95,9 +96,10 @@ defaults:
   disag_action_cond: False
 
 
-sac-011-rev0:
-  exp_name: 'sac-011-rev0'
+sac-012-rev0:
+  exp_name: 'sac-012-rev0'
   intrinsic_reward: 'prediction_error'
+  behavior: 'vanilla_AC'
 
 debug:
   debug: True

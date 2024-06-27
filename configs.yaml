@@ -8,7 +8,7 @@ defaults:
   eval_batch_size: 512
   exp_name: 'default'
   logdir: 'logs'
-  load_model: ''
+  load_wm: 'models/sac-010-rev2-random-1M.pt'
   traindir: null
   offline_traindir: ''
   seed: 0
@@ -96,8 +96,8 @@ defaults:
   disag_action_cond: False
 
 
-sac-012-rev0:
-  exp_name: 'sac-012-rev0'
+sac-012-rev1:
+  exp_name: 'sac-012-rev1'
   intrinsic_reward: 'prediction_error'
   behavior: 'vanilla_AC'
 

@@ -520,8 +520,8 @@ def main(config):
         vec_envs,
     ).to(config.device)
     agent.requires_grad_(requires_grad=False)
-    if config.load_model != "":
-        checkpoint = torch.load(config.load_model)
+    if config.load_wm != "":
+        checkpoint = torch.load(config.load_wm)
         agent.load_state_dict(checkpoint["agent_state_dict"])
         tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
         agent._should_pretrain._once = False

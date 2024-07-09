@@ -236,8 +236,8 @@ class Dreamer(nn.Module):
                 for name, values in self._metrics.items():
                     self._logger.scalar(name, float(np.mean(values)))
                     self._metrics[name] = []
-            # if self._should_eval(step):
-            #     self.saccade_evaluation()
+            if self._should_eval(step):
+                self.saccade_evaluation()
             self._logger.write(fps=True)
 
         policy_output, state = self._policy(obs, state, training)

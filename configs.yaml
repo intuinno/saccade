@@ -101,6 +101,11 @@ sac-012-rev1:
   intrinsic_reward: 'prediction_error'
   behavior: 'vanilla_AC'
 
+sac-012-rev2:
+  exp_name: 'sac-012-rev2'
+  intrinsic_reward: 'disagreement'
+  behavior: 'imagine'
+
 debug:
   debug: True
   pretrain: 1

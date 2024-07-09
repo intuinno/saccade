@@ -12,14 +12,14 @@
       "console": "integratedTerminal"
     }, 
     {
-      "name": "sac-012-rev1",
+      "name": "sac-012-rev2",
       "type": "debugpy", 
       "request": "launch", 
       "program": "${workspaceFolder}/dreamer.py",
       "console": "integratedTerminal",
       "justMyCode": true, 
       "args": [
-          "--configs", "sac-012-rev1",
+          "--configs", "sac-012-rev2",
           // "--configs", "sac-012-rev1", "debug",
           // "--device", "cuda:0",
           // "--compile", "False",

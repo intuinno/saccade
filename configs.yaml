@@ -104,7 +104,7 @@ sac-012-rev1:
 sac-012-rev2:
   exp_name: 'sac-012-rev2'
   intrinsic_reward: 'disagreement'
-  behavior: 'imagine'
+  behavior: 'imagine_AC'
 
 debug:
   debug: True

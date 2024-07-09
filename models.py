@@ -447,7 +447,9 @@ class ImagBehavior(nn.Module):
     def _compute_target(self, imag_feat, imag_state, reward):
         if "cont" in self._world_model.heads:
             inp = self._world_model.dynamics.get_feat(imag_state)
-            discount = self._config.discount * self._world_model.heads["cont"](inp).mean
+            discount = (
+                self._config.discount_gamma * self._world_model.heads["cont"](inp).mean
+            )
         else:
             discount = self._config.discount * torch.ones_like(reward)
         value = self.value(imag_feat).mode()

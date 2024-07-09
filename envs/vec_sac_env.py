@@ -307,10 +307,16 @@ class VecSaccadeEnv(gym.Env):
 
 class VecSaccadeEnvAdapter:
     def __init__(self, num_envs, configs):
+        if configs.debug:
+            is_compile = True
+        else:
+            is_compile = False
+
         env = VecSaccadeEnv(
             num_loc_per_side=configs.num_loc_per_side,
             device=configs.device,
             num_environment=num_envs,
+            compile=is_compile,
         )
         self.num_envs = num_envs
         self._env = env

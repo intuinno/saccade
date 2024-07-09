@@ -159,8 +159,8 @@ class Dreamer(nn.Module):
         batch = build_batch(buffer)
         return batch
 
-    def get_init_wm_state(self):
-        init_state = self._wm.dynamics.initial(self._config.envs)
+    def get_init_wm_state(self, num_envs):
+        init_state = self._wm.dynamics.initial(num_envs)
         init_state["feat"] = self._wm.dynamics.get_feat(init_state)
         return init_state
 
@@ -236,8 +236,8 @@ class Dreamer(nn.Module):
                 for name, values in self._metrics.items():
                     self._logger.scalar(name, float(np.mean(values)))
                     self._metrics[name] = []
-            if self._should_eval(step):
-                self.saccade_evaluation()
+            # if self._should_eval(step):
+            #     self.saccade_evaluation()
             self._logger.write(fps=True)
 
         policy_output, state = self._policy(obs, state, training)
@@ -289,7 +289,7 @@ class Dreamer(nn.Module):
 
     def behavior_train(self):
         _ = self._envs.reset()
-        init_state = self.get_init_wm_state()
+        init_state = self.get_init_wm_state(self._config.eval_batch_size)
         state = init_state
 
         with tools.RequiresGrad(self._task_behavior):
@@ -521,8 +521,10 @@ def main(config):
     ).to(config.device)
     agent.requires_grad_(requires_grad=False)
     if config.load_wm != "":
-        checkpoint = torch.load(config.load_wm)
-        agent.load_state_dict(checkpoint["agent_state_dict"])
+        checkpoint = torch.load(
+            config.load_wm, map_location=torch.device(config.device)
+        )
+        agent.load_state_dict(checkpoint["agent_state_dict"], strict=False)
         tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
         agent._should_pretrain._once = False
 

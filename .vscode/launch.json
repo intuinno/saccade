@@ -12,18 +12,18 @@
       "console": "integratedTerminal"
     }, 
     {
-      "name": "sac-012-rev2",
+      "name": "sac-013-rev0",
       "type": "debugpy", 
       "request": "launch", 
       "program": "${workspaceFolder}/dreamer.py",
       "console": "integratedTerminal",
       "justMyCode": true, 
       "args": [
-          "--configs", "sac-012-rev2",
+          "--configs", "sac-013-rev0", "debug",
           // "--configs", "sac-012-rev1", "debug",
           // "--device", "cuda:0",
           // "--compile", "False",
-          "--device", "cpu",
+          // "--device", "cpu",
           // "--eval_every", "5000000",
           // "--load_model", "./models/sac-008-rev0-1M.pt",
           // "--logdir", "./logs/debug"

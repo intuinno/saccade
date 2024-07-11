@@ -15,7 +15,7 @@
       "name": "sac-013-rev0",
       "type": "debugpy", 
       "request": "launch", 
-      "program": "${workspaceFolder}/dreamer.py",
+      "program": "${workspaceFolder}/train.py",
       "console": "integratedTerminal",
       "justMyCode": true, 
       "args": [

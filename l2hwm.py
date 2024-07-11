@@ -6,12 +6,7 @@ import numpy as np
 import einops
 import torch.nn.functional as F
 from torch import distributions as torchd
-from torchview import draw_graph
-import graphviz
 import math
-
-# graphviz.set_jupyter_format('png')
-from torchviz import make_dot, make_dot_from_trace
 
 to_np = lambda x: x.detach().cpu().numpy()
 
@@ -140,11 +135,9 @@ class LocalLayer(nn.Module):
         self._use_amp = True if configs.precision == 16 else False
         self.lowerLayer = lower
         if configs.dyn_discrete:
-            state_size = (
-                configs.dyn_stoch_size * configs.dyn_discrete + configs.dyn_deter_size
-            )
+            state_size = configs.dyn_stoch * configs.dyn_discrete + configs.dyn_deter
         else:
-            state_size = configs.dyn_stoch_size + configs.dyn_deter_size
+            state_size = configs.dyn_stoch + configs.dyn_deter
         enc_input_size = state_size * configs.tmp_abs_factor
         self.isBottom = isBottom
         self.step = 0
@@ -154,28 +147,9 @@ class LocalLayer(nn.Module):
         else:
             context_size = state_size
 
-        self.dynamics = networks.RSSM(
-            stoch=configs.dyn_stoch_size,
-            deter=configs.dyn_deter_size,
-            hidden=configs.dyn_hidden_size,
-            context=context_size,
-            layers_input=configs.dyn_input_layers,
-            layers_output=configs.dyn_output_layers,
-            discrete=configs.dyn_discrete,
-            act=configs.act,
-            mean_act=configs.dyn_mean_act,
-            std_act=configs.dyn_std_act,
-            min_std=configs.dyn_min_stddev,
-            unimix_ratio=configs.unimix_ratio,
-            initial=configs.initial,
-            num_actions=0,
-            embed=configs.enc_emb_size,
-            device=configs.device,
-        )
-
         if isBottom:
             self.encoder = networks.ConvEncoder(
-                configs.enc_emb_size,
+                configs.embed_size,
                 channels=configs.channels,
                 depth=configs.cnn_depth,
                 act=getattr(nn, configs.act),
@@ -206,6 +180,28 @@ class LocalLayer(nn.Module):
                 activation="elu",
                 batch_norm=True,
             )
+
+        self.embed_size = self.encoder.outdim
+
+        self.dynamics = networks.RSSM(
+            stoch=configs.dyn_stoch,
+            deter=configs.dyn_deter,
+            hidden=configs.dyn_hidden,
+            context=context_size,
+            rec_depth=configs.dyn_rec_depth,
+            discrete=configs.dyn_discrete,
+            act=configs.act,
+            norm=configs.norm,
+            mean_act=configs.dyn_mean_act,
+            std_act=configs.dyn_std_act,
+            min_std=configs.dyn_min_std,
+            unimix_ratio=configs.unimix_ratio,
+            initial=configs.initial,
+            num_actions=configs.num_actions,
+            embed=self.embed_size,
+            device=configs.device,
+        )
+
         self.optimizer = tools.Optimizer(
             name,
             self.parameters(),

@@ -8,7 +8,7 @@ defaults:
   eval_batch_size: 512
   exp_name: 'default'
   logdir: 'logs'
-  load_wm: 'models/sac-010-rev2-random-1M.pt'
+  load_wm: ''
   traindir: null
   offline_traindir: ''
   seed: 0
@@ -95,16 +95,15 @@ defaults:
   disag_units: 400
   disag_action_cond: False
 
+  # L2HWM
+  tmp_abs_factor: 4
+  levels: 3
+  dyn_stoch_size: 
 
-sac-012-rev1:
-  exp_name: 'sac-012-rev1'
+sac-013-rev0:
+  exp_name: 'sac-013-rev0'
   intrinsic_reward: 'prediction_error'
   behavior: 'vanilla_AC'
-
-sac-012-rev2:
-  exp_name: 'sac-012-rev2'
-  intrinsic_reward: 'disagreement'
-  behavior: 'imagine_AC'
 
 debug:
   debug: True

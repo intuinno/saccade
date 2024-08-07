@@ -19,7 +19,8 @@
       "console": "integratedTerminal",
       "justMyCode": true, 
       "args": [
-          "--configs", "sac-013-rev0", "debug",
+          "--configs", "sac-013-rev0", 
+          // "--configs", "sac-013-rev0", "debug",
           // "--configs", "sac-012-rev1", "debug",
           // "--device", "cuda:0",
           // "--compile", "False",

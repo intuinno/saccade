@@ -117,7 +117,7 @@ def main(config):
 
         # Write training summary
         for name, values in metrics.items():
-            # logger.scalar(name, float(np.mean(values)))
+            logger.scalar(name, float(np.mean(values)))
             metrics[name] = []
         # if epoch % configs.train_gif_every == 0:
         #     openl, recon_loss = model.video_pred(x)

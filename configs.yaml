@@ -12,7 +12,7 @@ defaults:
   eval_every: 50000
   log_every: 10000
   reset_every: 64
-  device: 'cuda:0'
+  device: 'cpu'
   compile: True
   precision: 32
   debug: False

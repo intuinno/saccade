@@ -220,7 +220,7 @@ class LocalModule(nn.Module):
         metrics[f"recon_loss_{self.name}"] = to_np(recon_loss)
         metrics[f"kl_loss_{self.name}"] = to_np(kl_loss)
         metrics[f"loss_{self.name}"] = to_np(loss)
-        metrics[f"grad_norm_{self.name}"] = self.optimizer(loss, self.parameters())
+        # metrics[f"grad_norm_{self.name}"] = self.optimizer(loss, self.parameters())
         metrics[f"kl_{self.name}"] = to_np(torch.mean(kl_value))
         sum_entropy = torch.sum(self.dynamics.get_dist(prior).entropy(), dim=1)
         mean_entropy = torch.mean(sum_entropy)

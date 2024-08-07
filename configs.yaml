@@ -23,24 +23,24 @@ defaults:
   action_repeat: 1
 
   # Model
-  dyn_hidden: 32
-  dyn_deter: 32
-  dyn_stoch: 8
-  dyn_discrete: 8
+  dyn_hidden: 512
+  dyn_deter: 512
+  dyn_stoch: 32
+  dyn_discrete: 32
   dyn_rec_depth: 1
   dyn_mean_act: 'none'
   dyn_std_act: 'sigmoid2'
   dyn_min_std: 0.1
-  units: 64
+  units: 1024
   dyn_act: 'SiLU'
   dyn_norm: True
   enc_num_layers: 3
-  enc_emb_size: 64
+  enc_emb_size: 1024
   enc_act: 'SiLU'
   enc_norm: True
   enc_symlog_inputs: True
   dec_num_layers: 3
-  dec_emb_size: 64
+  dec_emb_size: 1024
   dec_act: 'SiLU'
   dec_norm: True 
   dec_dist: symlog_mse 

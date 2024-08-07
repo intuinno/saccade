@@ -119,6 +119,7 @@ def main(config):
         for name, values in metrics.items():
             logger.scalar(name, float(np.mean(values)))
             metrics[name] = []
+            logger.write(step=epoch)
         # if epoch % configs.train_gif_every == 0:
         #     openl, recon_loss = model.video_pred(x)
         #     logger.video("train_openl", openl)

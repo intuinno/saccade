@@ -183,28 +183,7 @@ class RSSM(nn.Module):
             )
         return dist
 
-    def obs_step(self, prev_state, prev_action, embed, is_first, sample=True):
-        # initialize all prev_state
-        if prev_state == None or torch.sum(is_first) == len(is_first):
-            prev_state = self.initial(len(is_first))
-            prev_action = torch.zeros((len(is_first), self._num_actions)).to(
-                self._device
-            )
-        # overwrite the prev_state only where is_first=True
-        elif torch.sum(is_first) > 0:
-            is_first = is_first[:, None]
-            prev_action *= 1.0 - is_first
-            init_state = self.initial(len(is_first))
-            for key, val in prev_state.items():
-                is_first_r = torch.reshape(
-                    is_first,
-                    is_first.shape + (1,) * (len(val.shape) - len(is_first.shape)),
-                )
-                prev_state[key] = (
-                    val * (1.0 - is_first_r) + init_state[key] * is_first_r
-                )
-
-        prior = self.img_step(prev_state, prev_action)
+    def obs_step(self, prior, embed, sample=True):
         x = torch.cat([prior["deter"], embed], -1)
         # (batch_size, prior_deter + embed) -> (batch_size, hidden)
         x = self._obs_out_layers(x)
@@ -215,7 +194,7 @@ class RSSM(nn.Module):
         else:
             stoch = self.get_dist(stats).mode()
         post = {"stoch": stoch, "deter": prior["deter"], **stats}
-        return post, prior
+        return post
 
     def img_step(self, prev_state, prev_action, sample=True):
         # (batch, stoch, discrete_num)

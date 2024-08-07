@@ -7,10 +7,32 @@ import sys
 from tqdm import tqdm
 
 import tools
-from l2hwm import L2HWM
+from cognitive_architecture import CognitiveArchitecture
 from datetime import datetime
 import pytz
 from envs.vec_sac_env import VecSaccadeEnvAdapter
+
+
+def append_buffer(buffer, item):
+    for key, val in item.items():
+        if key not in buffer:
+            if isinstance(val, dict):
+                buffer[key] = {}
+            else:
+                buffer[key] = []
+        if isinstance(val, dict):
+            append_buffer(buffer[key], val)
+        else:
+            buffer[key].append(val)
+
+
+def build_batch_behavior(buffer):
+    for key, val in buffer.items():
+        if isinstance(val, dict):
+            buffer[key] = build_batch_behavior(buffer[key])
+        else:
+            buffer[key] = torch.stack(buffer[key])
+    return buffer
 
 
 def main(config):
@@ -27,7 +49,6 @@ def main(config):
     config.steps //= config.action_repeat
     config.eval_every //= config.action_repeat
     config.log_every //= config.action_repeat
-    config.time_limit //= config.action_repeat
     config.use_amp = True if config.precision == 16 else False
 
     print("Logdir:", logdir)
@@ -40,65 +61,68 @@ def main(config):
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
 
     config_backup = argparse.Namespace(**vars(config))
-    config_backup.traindir = str(config.traindir)
+    config_backup.logdir = str(config.logdir)
     yaml = YAML(typ="safe")
     yaml.default_flow_style = False
     with open(logdir / "config.yml", "w") as f:
         yaml.dump(vars(config_backup), f)
 
     # Build model
-    model = L2HWM(config).to(config.device)
+    model = CognitiveArchitecture(config).to(config.device)
 
     print(f"========== Using {config.device} device ===================")
 
     # Load model if args.load_model is not none
-    if args.load_model is not None:
-        model_path = pathlib.Path(args.load_model).expanduser()
+    if config.load_model != "":
+        model_path = pathlib.Path(config.load_model).expanduser()
         print(f"========== Loading saved model from {model_path} ===========")
         checkpoint = torch.load(model_path)
         model.load_state_dict(checkpoint["model_state_dict"])
 
     # Build logger
-    logger = tools.Logger(exp_logdir, 0)
+    logger = tools.Logger(logdir, 0)
     metrics = {}
 
-    for epoch in range(configs.num_epochs):
-        # Write evaluation summary
-        print(f"======== Epoch {epoch} / {configs.num_epochs} ==========")
-        now = datetime.now(tz)
-        current_time = now.strftime("%H:%M:%S")
-        print("Current Time =", current_time)
-
-        logger.step = epoch
-        if epoch % configs.eval_every == 0:
-            print(f"Evaluating ... ")
-            recon_loss_list = []
-            for i, x in enumerate(tqdm(val_dataloader)):
-                openl, recon_loss = model.video_pred(x.to(configs.device))
-                if i == 0:
-                    logger.video("eval_openl", openl)
-                recon_loss_list.append(recon_loss)
-            recon_loss_mean = np.mean(recon_loss_list)
-            logger.scalar("eval_video_nll", recon_loss_mean)
-
-        print(f"Training ...")
-        for i, x in enumerate(tqdm(train_dataloader)):
-            x = x.to(configs.device)
-            met = model.local_train(x)
-            for name, values in met.items():
-                if not name in metrics.keys():
-                    metrics[name] = [values]
-                else:
-                    metrics[name].append(values)
+    for epoch in tqdm(range(config.num_epochs)):
+        state = model.wm.init()
+        feat = model.wm.get_feat(state)
+        with torch.cuda.amp.autocast(config.use_amp):
+            with tools.RequiresGrad(model):
+                buffer = {}
+                obs = vec_envs.reset()
+                for _ in range(config.batch_length):
+                    action, logprob, actor_ent = model.get_action(feat)
+                    detached_action = action.detach().clone()
+                    obs, _, _, _ = vec_envs.step(detached_action)
+                    append_buffer(
+                        buffer,
+                        {
+                            "state": feat,
+                            "action": detached_action,
+                            "logprob": logprob,
+                            "actor_ent": actor_ent,
+                            "obs": obs,
+                        },
+                    )
+                    feat = model.wm_step(detached_action, obs)
+                # batch = build_batch(buffer)
+                # batch["reward"] = model.calculate_reward(batch)
+                # met = model.train(batch)
+                met = model.train(buffer)
+                for name, values in met.items():
+                    if not name in metrics.keys():
+                        metrics[name] = [values]
+                    else:
+                        metrics[name].append(values)
 
         # Write training summary
         for name, values in metrics.items():
-            logger.scalar(name, float(np.mean(values)))
+            # logger.scalar(name, float(np.mean(values)))
             metrics[name] = []
-        if epoch % configs.train_gif_every == 0:
-            openl, recon_loss = model.video_pred(x)
-            logger.video("train_openl", openl)
-            logger.write(fps=True)
+        # if epoch % configs.train_gif_every == 0:
+        #     openl, recon_loss = model.video_pred(x)
+        #     logger.video("train_openl", openl)
+        #     logger.write(fps=True)
 
         checkpoint = {
             "epoch": epoch + 1,
@@ -106,11 +130,11 @@ def main(config):
             # 'logger': logger,
         }
         # Save Check point
-        if epoch % configs.save_model_every == 0:
-            torch.save(checkpoint, exp_logdir / "latest_checkpoint.pt")
+        if epoch % config.save_model_every == 0:
+            torch.save(checkpoint, logdir / "latest_checkpoint.pt")
 
-        if epoch % configs.backup_model_every == 0:
-            torch.save(checkpoint, exp_logdir / f"state_{epoch}.pt")
+        if epoch % config.backup_model_every == 0:
+            torch.save(checkpoint, logdir / f"state_{epoch}.pt")
 
     print("Training complete.")
 

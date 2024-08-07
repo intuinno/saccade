@@ -1,61 +1,55 @@
 defaults:
-  behavior: 'imagineAC' # vanilla_AC or imagine_AC
-  envs: 8
-  parallel: True
+  behavior: 'vanilla_AC' # vanilla_AC or imagine_AC
   num_loc_per_side: 4
-  intrinsic_reward: 'none'
   batch_size: 128
   eval_batch_size: 512
   exp_name: 'default'
   logdir: 'logs'
-  load_wm: ''
-  traindir: null
-  offline_traindir: ''
+  load_model: ''
   seed: 0
-  deterministic_run: False
+  deterministic_run: True
   steps: 1e9
   eval_every: 50000
   log_every: 10000
-  reset_every: 0
+  reset_every: 64
   device: 'cuda:0'
   compile: True
   precision: 32
   debug: False
+  reward_EMA: True
+  num_epochs: 300
 
   # Environment
-  task: 'saccade_MMNIST'
-  size: [64, 64]
   action_repeat: 1
-  time_limit: 1000
-  grayscale: False
-  prefill: 2500
-  reward_EMA: True
 
   # Model
-  dyn_hidden: 512
-  dyn_deter: 512
-  dyn_stoch: 32
-  dyn_discrete: 32
+  dyn_hidden: 32
+  dyn_deter: 32
+  dyn_stoch: 8
+  dyn_discrete: 8
   dyn_rec_depth: 1
   dyn_mean_act: 'none'
   dyn_std_act: 'sigmoid2'
   dyn_min_std: 0.1
-  grad_heads: ['decoder', 'reward', 'cont']
-  units: 512
-  act: 'SiLU'
-  norm: True
-  encoder:
-    {mlp_keys: 'central|peripheral', cnn_keys: '$^', act: 'SiLU', norm: True, cnn_depth: 32, kernel_size: 4, minres: 4, mlp_layers: 5, mlp_units: 1024, symlog_inputs: True}
-  decoder:
-    {mlp_keys: 'central|peripheral', cnn_keys: '$^', act: 'SiLU', norm: True, cnn_depth: 32, kernel_size: 4, minres: 4, mlp_layers: 5, mlp_units: 1024, cnn_sigmoid: False, image_dist: mse, vector_dist: symlog_mse, outscale: 1.0}
+  units: 64
+  dyn_act: 'SiLU'
+  dyn_norm: True
+  enc_num_layers: 3
+  enc_emb_size: 64
+  enc_act: 'SiLU'
+  enc_norm: True
+  enc_symlog_inputs: True
+  dec_num_layers: 3
+  dec_emb_size: 64
+  dec_act: 'SiLU'
+  dec_norm: True 
+  dec_dist: symlog_mse 
+  dec_outscale: 1.0 
+  feeder_keys: {'central': 256, 'peripheral':64, 'loc': 16}
   actor:
-    {layers: 3, dist: 'onehot', entropy: 3e-4, unimix_ratio: 0.01, std: 'none', min_std: 0.1, max_std: 1.0, temp: 0.1, lr: 3e-5, eps: 1e-5, grad_clip: 100.0, outscale: 1.0}
+    {layers: 3, dist: 'onehot', entropy: 3e-4, unimix_ratio: 0.01, std: 'none', min_std: 0.1, max_std: 1.0, temp: 0.1, lr: 3e-5, eps: 1e-5, grad_clip: 100.0, outscale: 1.0, act: 'SiLU', norm: True}
   critic:
-    {layers: 2, dist: 'symlog_disc', slow_target: True, slow_target_update: 1, slow_target_fraction: 0.02, lr: 3e-5, eps: 1e-5, grad_clip: 100.0, outscale: 0.0}
-  reward_head:
-    {layers: 2, dist: 'symlog_disc', loss_scale: 1.0, outscale: 0.0}
-  cont_head:
-    {layers: 2, loss_scale: 1.0, outscale: 1.0}
+    {layers: 2, dist: 'symlog_disc', slow_target: True, slow_target_update: 1, slow_target_fraction: 0.02, lr: 3e-5, eps: 1e-5, grad_clip: 100.0, outscale: 0.0, act: 'SiLU', norm: True}
   dyn_scale: 0.5
   rep_scale: 0.1
   kl_free: 1.0
@@ -68,11 +62,13 @@ defaults:
   batch_length: 64
   train_ratio: 512
   pretrain: 100
-  model_lr: 1e-4
+  lr: 1e-4
   opt_eps: 1e-8
   grad_clip: 1000
   dataset_size: 10000000
   opt: 'adam'
+  save_model_every: 1
+  backup_model_every: 100
 
   # Behavior.
   discount_gamma: 0.997
@@ -96,7 +92,7 @@ defaults:
   disag_action_cond: False
 
   # L2HWM
-  tmp_abs_factor: 4
+  tmp_abs_factor: 1
   levels: 3
   dyn_stoch_size: 
 

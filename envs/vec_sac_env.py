@@ -7,6 +7,7 @@ import pygame
 import einops
 from pygame.locals import *
 import torchvision
+from torch.nn.functional import one_hot
 
 torch._dynamo.config.capture_func_transforms = True
 
@@ -41,6 +42,8 @@ class VecSaccadeEnv(gym.Env):
         else:
             raise NotImplementedError
 
+        self.num_loc = num_loc_per_side**2
+
         self.max_speed = max_speed
         self.num_env = num_environment
 
@@ -66,10 +69,10 @@ class VecSaccadeEnv(gym.Env):
                 "peripheral": spaces.Box(
                     0, 255, shape=(self.peri_size, self.peri_size), dtype=np.uint8
                 ),
-                "loc": spaces.Discrete(self.num_loc_per_side**2),
+                "loc": spaces.Box(0, 1, shape=(self.num_loc,), dtype=np.uint8),
             }
         )
-        self.action_space = spaces.Discrete(self.num_loc_per_side**2)
+        self.action_space = spaces.Discrete(self.num_loc)
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -120,9 +123,7 @@ class VecSaccadeEnv(gym.Env):
             (speeds * torch.cos(direcs), speeds * torch.sin(direcs)),
             dim=1,
         )
-        self.loc = torch.randint(
-            self.num_loc_per_side**2, (self.num_env,), device=self.device
-        )
+        self.loc = torch.randint(self.num_loc, (self.num_env,), device=self.device)
         self.positions = torch.mul(
             torch.rand(
                 (
@@ -177,7 +178,7 @@ class VecSaccadeEnv(gym.Env):
         observation = {
             "central": self.central_vision,
             "peripheral": self.peri_vision,
-            # "loc": self.loc,
+            "loc": one_hot(self.loc, num_classes=self.num_loc),
         }
         info = {"canvas": self.canvas, "loc": self.loc}
         return observation, info
@@ -345,7 +346,7 @@ class VecSaccadeEnvAdapter:
                     0, 255, (np.prod(spaces["peripheral"].shape),), dtype=np.uint8
                 ),
                 "GT": gym.spaces.Box(0, 255, (64, 64), dtype=np.uint8),
-                # "loc": spaces.Discrete(16),
+                "loc": gym.spaces.Box(0, 1, shape=(self.num_loc,), dtype=np.uint8),
                 "is_first": gym.spaces.Box(0, 1, (), dtype=bool),
                 "is_last": gym.spaces.Box(0, 1, (), dtype=bool),
                 "is_terminal": gym.spaces.Box(0, 1, (), dtype=bool),

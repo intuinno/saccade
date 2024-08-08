@@ -775,7 +775,7 @@ class Optimizer:
     def __call__(self, loss, params, retain_graph=False):
         assert len(loss.shape) == 0, loss.shape
         metrics = {}
-        metrics[f"{self._name}_loss"] = loss.detach().cpu().numpy()
+        # metrics[f"{self._name}_loss"] = loss.detach().cpu().numpy()
         self._opt.zero_grad()
         self._scaler.scale(loss).backward(retain_graph=retain_graph)
         self._scaler.unscale_(self._opt)
@@ -788,7 +788,7 @@ class Optimizer:
         # self._opt.step()
         self._opt.zero_grad()
         metrics[f"{self._name}_grad_norm"] = norm.item()
-        return metrics
+        return norm.item()
 
     def _apply_weight_decay(self, varibs):
         nontrivial = self._wd_pattern != r".*"

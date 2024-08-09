@@ -348,13 +348,15 @@ class CognitiveArchitecture(nn.Module):
         feats = batch["feat"][1:]
         feats = torch.stack(feats, dim=1)
         # feats = einops.rearrange(feats, "B T C -> (B T) C")
-        recon = self.video_decoder(feats)
-        recon = einops.repeat(recon, "B T W H 1 -> B T W H 3")
-        gt = [o["GT"] for o in batch["obs"]]
-        gt = torch.stack(gt, dim=1)
-        gt = einops.repeat(gt, "B T W H -> B T W H 3")
-        loss = self.video_loss(recon, gt)
-        grad = self.optimizer(loss, self.video_decoder.parameters())
+        with tools.RequiresGrad(self.video_decoder):
+            recon = self.video_decoder(feats)
+            gt = [o["GT"] for o in batch["obs"]]
+            gt = torch.stack(gt, dim=1)
+            gt = einops.rearrange(gt, "B T W H -> B T W H 1")
+            loss = self.video_loss(recon, gt)
+            grad = self.optimizer(loss, self.video_decoder.parameters())
         diff = (gt - recon + 128) / 256
         video = torch.cat([gt, recon, diff], 2)
+        video = video[:6]
+        video = einops.repeat(video, "B T H W 1 -> B T H W 3")
         return to_np(loss), to_np(video)

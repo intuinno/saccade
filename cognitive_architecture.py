@@ -311,6 +311,24 @@ class CognitiveArchitecture(nn.Module):
         self.configs = configs
         self.wm = HierarchicalWorldModel(configs)
         self.behavior = models.ACBehavior(configs)
+        if configs.dyn_discrete:
+            feat_size = configs.dyn_stoch * configs.dyn_discrete + configs.dyn_deter
+        else:
+            feat_size = configs.dyn_stoch + configs.dyn_deter
+        self.video_decoder = networks.ConvDecoder(
+            feat_size, shape=(1, 64, 64), act="SiLU"
+        )
+        self.optimizer = tools.Optimizer(
+            "video_optimizer",
+            self.video_decoder.parameters(),
+            configs.lr,
+            eps=configs.opt_eps,
+            clip=configs.grad_clip,
+            wd=configs.weight_decay,
+            opt=configs.opt,
+            # use_amp=self._use_amp,
+        )
+        self.video_loss = nn.MSELoss()
 
     def get_action(self, feat):
         actor = self.behavior.actor(feat)
@@ -325,3 +343,18 @@ class CognitiveArchitecture(nn.Module):
     def train(self, batch):
         # Train Hierarchical Worldmodel
         return self.wm.train()
+
+    def train_video(self, batch):
+        feats = batch["feat"][1:]
+        feats = torch.stack(feats, dim=1)
+        # feats = einops.rearrange(feats, "B T C -> (B T) C")
+        recon = self.video_decoder(feats)
+        recon = einops.repeat(recon, "B T W H 1 -> B T W H 3")
+        gt = [o["GT"] for o in batch["obs"]]
+        gt = torch.stack(gt, dim=1)
+        gt = einops.repeat(gt, "B T W H -> B T W H 3")
+        loss = self.video_loss(recon, gt)
+        grad = self.optimizer(loss, self.video_decoder.parameters())
+        diff = (gt - recon + 128) / 256
+        video = torch.cat([gt, recon, diff], 2)
+        return to_np(loss), to_np(video)

@@ -89,23 +89,23 @@ def main(config):
         with torch.cuda.amp.autocast(config.use_amp):
             with tools.RequiresGrad(model):
                 buffer = {}
+                buffer["feat"] = [feat]
+                buffer["action"] = []
+                buffer["logprob"] = []
+                buffer["actor_ent"] = []
+                buffer["obs"] = []
                 obs = vec_envs.reset()
                 for _ in range(config.batch_length):
                     action, logprob, actor_ent = model.get_action(feat)
                     detached_action = action.detach().clone()
                     obs, _, _, _ = vec_envs.step(detached_action)
-                    append_buffer(
-                        buffer,
-                        {
-                            "state": feat,
-                            "action": detached_action,
-                            "logprob": logprob,
-                            "actor_ent": actor_ent,
-                            "obs": obs,
-                        },
-                    )
                     feat = model.wm_step(detached_action, obs)
-                # batch = build_batch(buffer)
+                    buffer["feat"].append(feat)
+                    buffer["action"].append(action)
+                    buffer["logprob"].append(logprob)
+                    buffer["actor_ent"].append(actor_ent)
+                    buffer["obs"].append(obs)
+
                 # batch["reward"] = model.calculate_reward(batch)
                 # met = model.train(batch)
                 met = model.train(buffer)
@@ -114,6 +114,9 @@ def main(config):
                         metrics[name] = [values]
                     else:
                         metrics[name].append(values)
+                video_loss, train_video = model.train_video(buffer)
+                logger.video("train_video", train_video)
+                logger.scalar("video_loss", float(video_loss))
 
         # Write training summary
         for name, values in metrics.items():
@@ -121,7 +124,7 @@ def main(config):
             metrics[name] = []
             logger.write(step=epoch)
         # if epoch % configs.train_gif_every == 0:
-        #     openl, recon_loss = model.video_pred(x)
+        #     openl, recon_loss = model.video_decode(x)
         #     logger.video("train_openl", openl)
         #     logger.write(fps=True)
 

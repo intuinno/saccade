@@ -1,7 +1,7 @@
 defaults:
   behavior: 'vanilla_AC' # vanilla_AC or imagine_AC
   num_loc_per_side: 4
-  batch_size: 128
+  batch_size: 512
   eval_batch_size: 512
   exp_name: 'default'
   logdir: 'logs'
@@ -17,7 +17,7 @@ defaults:
   precision: 32
   debug: False
   reward_EMA: True
-  num_epochs: 300
+  num_epochs: 30000
 
   # Environment
   action_repeat: 1
@@ -117,6 +117,28 @@ sac-013-rev1:
   dyn_discrete: 32
   enc_emb_size: 1024
   dec_emb_size: 1024
+    
+sac-013-rev2-large:
+  exp_name: 'sac-013-rev2-large'
+  intrinsic_reward: 'prediction_error'
+  behavior: 'vanilla_AC'
+  dyn_hidden: 512
+  dyn_deter: 512
+  dyn_stoch: 32
+  dyn_discrete: 32
+  enc_emb_size: 1024
+  dec_emb_size: 1024
+
+sac-013-rev2-small:
+  exp_name: 'sac-013-rev2-small'
+  intrinsic_reward: 'prediction_error'
+  behavior: 'vanilla_AC'
+  dyn_hidden: 32
+  dyn_deter: 32
+  dyn_stoch: 8
+  dyn_discrete: 8
+  enc_emb_size: 64
+  dec_emb_size: 64
 
 debug:
   debug: True

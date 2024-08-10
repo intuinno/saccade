@@ -108,14 +108,14 @@ def main(config):
 
                 # batch["reward"] = model.calculate_reward(batch)
                 # met = model.train(batch)
-                met = model.train(buffer)
+                met, recon = model.train(buffer)
                 for name, values in met.items():
                     if not name in metrics.keys():
                         metrics[name] = [values]
                     else:
                         metrics[name].append(values)
                 video_loss, train_video = model.train_video(buffer)
-                logger.video("train_video", train_video)
+                logger.video("top_video", train_video)
                 logger.scalar("video_loss", float(video_loss))
 
         # Write training summary
@@ -123,10 +123,11 @@ def main(config):
             logger.scalar(name, float(np.mean(values)))
             metrics[name] = []
             logger.write(step=epoch)
-        # if epoch % configs.train_gif_every == 0:
-        #     openl, recon_loss = model.video_decode(x)
-        #     logger.video("train_openl", openl)
-        #     logger.write(fps=True)
+        if epoch % config.train_gif_every == 0:
+            openl = model.decode_video(recon, buffer)
+            for name, vid in openl.items():
+                logger.video(f"{name}-video", vid)
+        logger.write(fps=True)
 
         checkpoint = {
             "epoch": epoch + 1,

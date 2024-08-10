@@ -69,6 +69,7 @@ defaults:
   opt: 'adam'
   save_model_every: 1
   backup_model_every: 100
+  train_gif_every: 2
 
   # Behavior.
   discount_gamma: 0.997
@@ -93,8 +94,6 @@ defaults:
 
   # L2HWM
   tmp_abs_factor: 1
-  levels: 3
-  dyn_stoch_size: 
 
 sac-013-rev0:
   exp_name: 'sac-013-rev0'

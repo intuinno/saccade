@@ -4,6 +4,7 @@ import networks
 import models
 import torch
 import tools
+import numpy as np
 
 to_np = lambda x: x.detach().cpu().numpy()
 
@@ -228,8 +229,11 @@ class LocalModule(nn.Module):
         sum_entropy = torch.sum(self.dynamics.get_dist(post).entropy(), dim=1)
         mean_entropy = torch.mean(sum_entropy)
         metrics[f"posterior_ent_{self.name}"] = to_np(mean_entropy)
+        recon_video = {}
+        for name, dist in recon.items():
+            recon_video[name] = to_np(dist.mode())[:6]
         self.step += 1
-        return metrics
+        return metrics, recon_video
 
     def decode_video(self, states):
         recon = self.decoder(states).mode()
@@ -294,10 +298,12 @@ class HierarchicalWorldModel(nn.Module):
 
     def train(self):
         metrics = {}
+        videos = {}
         for name, module in self.local_modules.items():
-            met = module.update()
+            met, recon = module.update()
             metrics.update(met)
-        return metrics
+            videos.update(recon)
+        return metrics, videos
 
     def init(self):
         for name, module in self.local_modules.items():
@@ -316,7 +322,7 @@ class CognitiveArchitecture(nn.Module):
         else:
             feat_size = configs.dyn_stoch + configs.dyn_deter
         self.video_decoder = networks.ConvDecoder(
-            feat_size, shape=(1, 64, 64), act="SiLU"
+            feat_size, shape=(1, 64, 64), act="ELU"
         )
         self.optimizer = tools.Optimizer(
             "video_optimizer",
@@ -360,3 +366,26 @@ class CognitiveArchitecture(nn.Module):
         video = video[:6]
         video = einops.repeat(video, "B T H W 1 -> B T H W 3")
         return to_np(loss), to_np(video)
+
+    def decode_one_video(self, recon, buffer, target_feeder, target_obs, width):
+        # Peripheral vision video
+        peri_recon = recon[target_feeder]
+        peri_recon = einops.rearrange(peri_recon, "b t (w h) -> b t w h 1", w=width)
+        peri_gt = [o[target_obs] for o in buffer["obs"]]
+        peri_gt = torch.stack(peri_gt, dim=1)[:6]
+        peri_gt = einops.rearrange(peri_gt, "b t (w h) -> b t w h 1", w=width)
+        peri_gt = to_np(peri_gt)
+        diff = (peri_recon - peri_gt + 128) / 256
+        video = np.concatenate([peri_gt, peri_recon, diff], axis=2)
+        video = einops.repeat(video, "b t w h 1 -> b t w h 3")
+        return video
+
+    def decode_video(self, recon, buffer):
+        videos = {}
+        videos["peripheral"] = self.decode_one_video(
+            recon, buffer, "peripheral-feeder", "peripheral", 8
+        )
+        videos["central"] = self.decode_one_video(
+            recon, buffer, "central-feeder", "central", 16
+        )
+        return videos

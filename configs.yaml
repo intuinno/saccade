@@ -5,14 +5,14 @@ defaults:
   eval_batch_size: 512
   exp_name: 'default'
   logdir: 'logs'
-  load_model: ''
+  load_model: 'models/sac-013-rev2-large_16200.pt'
   seed: 0
   deterministic_run: True
   steps: 1e9
   eval_every: 50000
   log_every: 10000
   reset_every: 64
-  device: 'cpu'
+  device: 'cuda:0'
   compile: True
   precision: 32
   debug: False
@@ -129,6 +129,7 @@ sac-013-rev2-large:
   dyn_discrete: 32
   enc_emb_size: 1024
   dec_emb_size: 1024
+  batch_size: 256
 
 sac-013-rev2-small:
   exp_name: 'sac-013-rev2-small'

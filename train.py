@@ -122,12 +122,12 @@ def main(config):
         for name, values in metrics.items():
             logger.scalar(name, float(np.mean(values)))
             metrics[name] = []
-            logger.write(step=epoch)
+            logger.write(fps=True, step=epoch)
         if epoch % config.train_gif_every == 0:
             openl = model.decode_video(recon, buffer)
             for name, vid in openl.items():
                 logger.video(f"{name}-video", vid)
-        logger.write(fps=True)
+        logger.write(fps=True, step=epoch)
 
         checkpoint = {
             "epoch": epoch + 1,

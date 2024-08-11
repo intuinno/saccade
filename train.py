@@ -127,6 +127,23 @@ def main(config):
             openl = model.decode_video(recon, buffer)
             for name, vid in openl.items():
                 logger.video(f"{name}-video", vid)
+            # Build a video from imaginary central module
+            state = model.wm.init()
+            feat = model.wm.get_feat(state)
+            buffer = {}
+            buffer["obs"] = []
+            buffer["central_obs"] = []
+            obs = vec_envs.reset()
+            for _ in range(config.eval_obs_length):
+                action, _, _ = model.get_action(feat)
+                detached_action = action.detach().clone()
+                obs, _, _, _ = vec_envs.step(detached_action)
+                central_obs = model.wm.scan_central()
+                feat = model.wm_step(detached_action, obs)
+                buffer["central_obs"].append(central_obs)
+                buffer["obs"].append(obs)
+            # for _ in range(config.eval_img_length):
+
         logger.write(fps=True, step=epoch)
 
         checkpoint = {

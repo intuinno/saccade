@@ -69,7 +69,9 @@ defaults:
   opt: 'adam'
   save_model_every: 1
   backup_model_every: 100
-  train_gif_every: 2
+  train_gif_every: 100
+  eval_obs_length: 16
+  eval_img_length: 64
 
   # Behavior.
   discount_gamma: 0.997

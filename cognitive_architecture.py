@@ -40,7 +40,9 @@ class Feeder:
 
 class LocalModule(nn.Module):
 
-    def __init__(self, name="module", lowers=[], context_size=0, configs=None):
+    def __init__(
+        self, name="module", lowers=[], context_size=0, configs=None, is_leaf=False
+    ):
         """Initialize module
 
         Args:
@@ -52,7 +54,7 @@ class LocalModule(nn.Module):
         super(LocalModule, self).__init__()
         self.configs = configs
         self.name = name
-        self.isLeaf = False
+        self.is_leaf = is_leaf
         self._use_amp = True if configs.precision == 16 else False
         self.lowerModules = lowers
         if configs.dyn_discrete:
@@ -174,7 +176,7 @@ class LocalModule(nn.Module):
             obs[lower_module.name] = lower_module.feed(context=prior_state)
         flat_obs = torch.concat([obs[k] for k in self.mlp_shapes], dim=1)
         emb = self.encoder(flat_obs)
-        if self.isImaginary:
+        if self.is_leaf and self.isImaginary:
             post = prior
         else:
             post = self.dynamics.obs_step(prior, emb)
@@ -262,7 +264,9 @@ class HierarchicalWorldModel(nn.Module):
         for key, size in self.feeder_keys.items():
             self.feeders[key] = Feeder(key, size)
             name = f"{key}_module"
-            localModule = LocalModule(name, lowers=[self.feeders[key]], configs=configs)
+            localModule = LocalModule(
+                name, lowers=[self.feeders[key]], configs=configs, is_leaf=True
+            )
             modules[name] = localModule
 
         modules["assoc_module"] = LocalModule(
@@ -295,6 +299,24 @@ class HierarchicalWorldModel(nn.Module):
     def step(self, action, obs):
         self.load_feeders(obs)
         return self.local_modules["top_module"].feed(context=action)
+
+    def scan_central(self):
+        m = self.local_modules
+        patches = []
+        for a in range(self.configs.num_actions):
+            action = torch.nn.functional.one_hot(a)
+            action = einops.repeat("c -> b c", b=self.configs.batch_size)
+            top_prior = m["top_module"].dynamics.img_step(
+                m["top_module"].prev_state, action
+            )
+            assoc_prior = m["assoc_module"].dynamics.img_step(
+                m["assoc_module"].prev_state, top_prior
+            )
+            central_prior = m["central_module"].dynamics.img_step(
+                m["central_module"].prev_state, assoc_prior
+            )
+            patch = m["central_module"].decoder(central_prior)
+            patches.append(patch)
 
     def train(self):
         metrics = {}

@@ -9,6 +9,7 @@ import time
 import random
 import pickle
 import numpy as np
+import einops
 
 import torch
 from torch import nn
@@ -29,6 +30,17 @@ def symexp(x):
     return torch.sign(x) * (torch.exp(torch.abs(x)) - 1.0)
 
 
+def central_video(central, obs):
+    recon = torch.stack(central, 1)[:6]
+    recon = einops.repeat(recon, "B T W H -> B T W H 3")
+    gt = [o["GT"] for o in obs]
+    gt = torch.stack(gt, dim=1)[:6]
+    gt = einops.repeat(gt, "B T W H -> B T W H 3")
+    diff = (gt - recon + 128) / 256
+    video = torch.cat([gt, recon, diff], 2)
+    return to_np(video)
+
+
 class RequiresGrad:
     def __init__(self, model):
         self._model = model
@@ -38,6 +50,17 @@ class RequiresGrad:
 
     def __exit__(self, *args):
         self._model.requires_grad_(requires_grad=False)
+
+
+class ImagineMode:
+    def __init__(self, model):
+        self.model = model
+
+    def __enter__(self):
+        self.model.set_imagine_mode(True)
+
+    def __exit__(self, *args):
+        self.model.set_imagine_mode(False)
 
 
 class TimeRecording:

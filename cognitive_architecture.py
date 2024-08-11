@@ -57,6 +57,7 @@ class LocalModule(nn.Module):
         self.is_leaf = is_leaf
         self._use_amp = True if configs.precision == 16 else False
         self.lowerModules = lowers
+        self.is_imaginary = False
         if configs.dyn_discrete:
             state_size = configs.dyn_stoch * configs.dyn_discrete + configs.dyn_deter
         else:
@@ -144,7 +145,6 @@ class LocalModule(nn.Module):
         self.posteriors = []
         batch_size = self.configs.batch_size
         self.prev_state = self.dynamics.initial(batch_size)
-        self.isImaginary = False
 
     # Feed isolates between layer
     # It gets context from current layer.
@@ -176,7 +176,7 @@ class LocalModule(nn.Module):
             obs[lower_module.name] = lower_module.feed(context=prior_state)
         flat_obs = torch.concat([obs[k] for k in self.mlp_shapes], dim=1)
         emb = self.encoder(flat_obs)
-        if self.is_leaf and self.isImaginary:
+        if self.is_leaf and self.is_imaginary:
             post = prior
         else:
             post = self.dynamics.obs_step(prior, emb)
@@ -300,23 +300,34 @@ class HierarchicalWorldModel(nn.Module):
         self.load_feeders(obs)
         return self.local_modules["top_module"].feed(context=action)
 
-    def scan_central(self):
+    def get_feat_from_module(self, module_name, context):
         m = self.local_modules
+        prior = m[module_name].dynamics.img_step(m[module_name].prev_state, context)
+        feat = m[module_name].dynamics.get_feat(prior)
+        return feat
+
+    def scan_central(self):
         patches = []
         for a in range(self.configs.num_actions):
-            action = torch.nn.functional.one_hot(a)
-            action = einops.repeat("c -> b c", b=self.configs.batch_size)
-            top_prior = m["top_module"].dynamics.img_step(
-                m["top_module"].prev_state, action
+            a = torch.LongTensor([a])
+            action = torch.nn.functional.one_hot(
+                a, num_classes=self.configs.num_actions
             )
-            assoc_prior = m["assoc_module"].dynamics.img_step(
-                m["assoc_module"].prev_state, top_prior
-            )
-            central_prior = m["central_module"].dynamics.img_step(
-                m["central_module"].prev_state, assoc_prior
-            )
-            patch = m["central_module"].decoder(central_prior)
-            patches.append(patch)
+            action = einops.repeat(action, "1 c -> b c", b=self.configs.batch_size)
+            top_feat = self.get_feat_from_module("top_module", action)
+            assoc_feat = self.get_feat_from_module("assoc_module", top_feat)
+            central_feat = self.get_feat_from_module("central_module", assoc_feat)
+            patch = self.local_modules["central_module"].decoder(central_feat)
+            patches.append(patch["central-feeder"].mode().detach())
+        recon = torch.stack(patches, dim=1)
+        image = einops.rearrange(
+            recon, "b (w1 h1) (w2 h2) -> b (w1 w2) (h1 h2)", w1=4, w2=16
+        )
+        return image
+
+    def set_imagine_mode(self, mode):
+        for name, module in self.local_modules.items():
+            module.is_imaginary = mode
 
     def train(self):
         metrics = {}

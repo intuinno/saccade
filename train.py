@@ -142,7 +142,19 @@ def main(config):
                 feat = model.wm_step(detached_action, obs)
                 buffer["central_obs"].append(central_obs)
                 buffer["obs"].append(obs)
-            # for _ in range(config.eval_img_length):
+
+            with tools.ImagineMode(model.wm):
+                for _ in range(config.eval_img_length):
+                    action, _, _ = model.get_action(feat)
+                    detached_action = action.detach().clone()
+                    obs, _, _, _ = vec_envs.step(detached_action)
+                    central_obs = model.wm.scan_central()
+                    feat = model.wm_step(detached_action, obs)
+                    buffer["central_obs"].append(central_obs)
+                    buffer["obs"].append(obs)
+
+            central_video = tools.central_video(buffer["central_obs"], buffer["obs"])
+            logger.video("central-scan", central_video)
 
         logger.write(fps=True, step=epoch)
 

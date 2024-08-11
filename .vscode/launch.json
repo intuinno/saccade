@@ -12,19 +12,20 @@
       "console": "integratedTerminal"
     }, 
     {
-      "name": "sac-013-rev2-large",
+      "name": "sac-013-rev2-small",
       "type": "debugpy", 
       "request": "launch", 
       "program": "${workspaceFolder}/train.py",
       "console": "integratedTerminal",
       "justMyCode": true, 
       "args": [
-          "--configs", "sac-013-rev2-large", 
+          "--configs", "sac-013-rev2-small", 
           // "--configs", "sac-013-rev0", "debug",
           // "--configs", "sac-012-rev1", "debug",
           // "--device", "cuda:0",
           // "--compile", "False",
-          // "--device", "cpu",
+          "--device", "cpu",
+          "--batch_size", "128",
           // "--eval_every", "5000000",
           // "--load_model", "./models/sac-008-rev0-1M.pt",
           // "--logdir", "./logs/debug"

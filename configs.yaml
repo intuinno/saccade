@@ -5,7 +5,8 @@ defaults:
   eval_batch_size: 512
   exp_name: 'default'
   logdir: 'logs'
-  load_model: 'models/sac-013-rev2-large_16200.pt'
+  # load_model: 'models/sac-013-rev2-large_16200.pt'
+  load_model: ''
   seed: 0
   deterministic_run: True
   steps: 1e9

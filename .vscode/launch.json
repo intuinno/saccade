@@ -24,12 +24,14 @@
           // "--configs", "sac-012-rev1", "debug",
           // "--device", "cuda:0",
           // "--compile", "False",
-          "--device", "cpu",
+          // "--device", "cpu",
           "--batch_size", "128",
           // "--eval_every", "5000000",
+          "--load_model", "",
           // "--load_model", "./models/sac-008-rev0-1M.pt",
           // "--logdir", "./logs/debug"
           // "--debug", "True",
+          "--exp_name", "debug",
       ],
       "env": {
           // "XLA_PYTHON_CLIENT_MEM_FRACTION": ".30",

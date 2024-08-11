@@ -309,7 +309,7 @@ class HierarchicalWorldModel(nn.Module):
     def scan_central(self):
         patches = []
         for a in range(self.configs.num_actions):
-            a = torch.LongTensor([a])
+            a = torch.LongTensor([a]).to(self.configs.device)
             action = torch.nn.functional.one_hot(
                 a, num_classes=self.configs.num_actions
             )

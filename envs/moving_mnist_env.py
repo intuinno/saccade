@@ -2,6 +2,7 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
+import torch.nn.functional as F
 from abc import ABC, abstractmethod
 
 
@@ -12,25 +13,21 @@ class BaseEnv(ABC):
     # --- Private methods ---
 
     @abstractmethod
-    def _get_obs(self, state):
+    def _get_obs(self):
         pass
 
     @abstractmethod
-    def _reset(self, key):
-        pass
-
-    @abstractmethod
-    def _reset_if_done(self, env_state, done):
+    def _reset(self):
         pass
 
     # --- Public methods ---
 
     @abstractmethod
-    def reset(self, key):
+    def reset(self):
         pass
 
     @abstractmethod
-    def step(self, env_state, action):
+    def step(self, action):
         pass
 
 
@@ -44,13 +41,17 @@ class MovingMNISTEnv(BaseEnv):
         - 'delta_y': Tensor of shape [batch_size, 7], one-hot vectors representing shifts from -3 to +3 in Y.
         - 'digits': Tensor of shape [batch_size, 2], integers between 0 and 9 (guessed digits).
         - 'guess': Tensor of shape [batch_size], boolean flags (0 or 1).
+
+    The observation returned by the environment is now a dictionary containing:
+        - 'patch': Tensor of shape [batch_size, patch_size, patch_size], the image patches under the agent's position.
+        - 'downsampled_frame': Tensor of shape [batch_size, 8, 8], the 8x8 downsampled version of the whole Moving MNIST image.
     """
 
     def __init__(
         self, num_digits=2, image_size=64, num_frames=20, batch_size=32, device="cuda"
     ):
         super(MovingMNISTEnv, self).__init__()
-        self.num_digits = num_digits  # Number of moving digits (set to 2)
+        self.num_digits = num_digits  # Number of moving digits
         self.image_size = image_size  # Must be divisible by grid_size
         self.num_frames = num_frames
         self.batch_size = batch_size
@@ -85,12 +86,16 @@ class MovingMNISTEnv(BaseEnv):
 
         # Agent positions on the grid (initialize in _reset)
         self.agent_pos = None  # Shape: [batch_size, 2], where each position is [x, y]
+        self.done = torch.zeros(self.batch_size, dtype=torch.bool, device=self.device)
 
     # --- Private methods ---
 
     def _get_obs(self):
         """
         Extracts the observation from the current state based on the agent's position.
+        Returns a dictionary containing:
+            - 'patch': Tensor of shape [batch_size, patch_size, patch_size]
+            - 'downsampled_frame': Tensor of shape [batch_size, 8, 8]
         """
         frames = self.frames
 
@@ -112,15 +117,29 @@ class MovingMNISTEnv(BaseEnv):
                 x_start : x_start + self.patch_size,
             ]
 
-        return patches  # Shape: [batch_size, patch_size, patch_size]
+        # Downsample frames to 8x8
+        downsampled_frames = F.interpolate(
+            frames.unsqueeze(1), size=(8, 8), mode="bilinear", align_corners=False
+        ).squeeze(
+            1
+        )  # Shape: [batch_size, 8, 8]
 
-    def _reset(self, key=None):
+        # Return as a dictionary
+        observation = {
+            "patch": patches,  # Shape: [batch_size, patch_size, patch_size]
+            "downsampled_frame": downsampled_frames,  # Shape: [batch_size, 8, 8]
+        }
+
+        return observation
+
+    def _reset(self):
         """
         Resets the environment and generates a new batch of sequences.
         """
         self.current_step = torch.zeros(
             self.batch_size, dtype=torch.long, device=self.device
         )
+        self.done = torch.zeros(self.batch_size, dtype=torch.bool, device=self.device)
 
         # Randomly select digits for each sequence
         indices = torch.randint(
@@ -167,19 +186,13 @@ class MovingMNISTEnv(BaseEnv):
         # Initial observation
         observation = self._get_obs()  # Get the initial observation
 
-        # Initial state
-        env_state = {
-            "frames": self.frames,
-            "done": torch.zeros(self.batch_size, dtype=torch.bool, device=self.device),
-            "agent_pos": self.agent_pos,
-        }
+        return observation
 
-        return env_state, observation
-
-    def _reset_if_done(self, env_state, done):
+    def _reset_if_done(self):
         """
         Resets the environments where done is True.
         """
+        done = self.done
         if done.any():
             indices = done.nonzero(as_tuple=True)[0]
             # Reset current step for the done environments
@@ -212,6 +225,8 @@ class MovingMNISTEnv(BaseEnv):
                 device=self.device,
                 dtype=torch.long,
             )
+            # Reset done flags
+            self.done[indices] = False
             # Do not generate frames here; frames will be generated for all environments in _generate_frame()
 
     def _generate_frame(self):
@@ -226,19 +241,69 @@ class MovingMNISTEnv(BaseEnv):
         self.velocity[over] *= -1
         self.pos = torch.clamp(self.pos, 0, self.image_size - 28)
 
-        # Create frames for all environments
+        # Initialize frames tensor
         frames = torch.zeros(
             self.batch_size, self.image_size, self.image_size, device=self.device
         )
 
-        x = self.pos[:, :, 0].long()
-        y = self.pos[:, :, 1].long()
+        # Get integer positions
+        x = self.pos[:, :, 0].long()  # Shape: [batch_size, num_digits]
+        y = self.pos[:, :, 1].long()  # Shape: [batch_size, num_digits]
 
-        for i in range(self.num_digits):
-            for b in range(self.batch_size):
-                frames[
-                    b, y[b, i] : y[b, i] + 28, x[b, i] : x[b, i] + 28
-                ] += self.digits[b, i]
+        # Flatten batch and digit dimensions
+        batch_digits = self.batch_size * self.num_digits
+        digits_flat = self.digits.view(batch_digits, 28, 28)
+        x_flat = x.view(batch_digits)
+        y_flat = y.view(batch_digits)
+
+        # Create coordinate grids for the digits
+        grid_y, grid_x = torch.meshgrid(
+            torch.arange(28, device=self.device), torch.arange(28, device=self.device)
+        )  # Shape: [28, 28]
+
+        # Expand grids to match batch size
+        grid_x = (
+            grid_x.unsqueeze(0) + x_flat[:, None, None]
+        )  # Shape: [batch_digits, 28, 28]
+        grid_y = (
+            grid_y.unsqueeze(0) + y_flat[:, None, None]
+        )  # Shape: [batch_digits, 28, 28]
+
+        # Flatten the grids and digits
+        grid_x_flat = grid_x.reshape(-1)  # Shape: [batch_digits * 28 * 28]
+        grid_y_flat = grid_y.reshape(-1)
+        digits_flat_flat = digits_flat.reshape(-1)
+
+        # Create batch indices
+        batch_indices = (
+            torch.arange(self.batch_size, device=self.device)
+            .unsqueeze(1)
+            .repeat(1, self.num_digits)
+            .view(-1)
+        )
+        batch_indices = batch_indices[:, None, None].expand(batch_digits, 28, 28)
+        batch_indices_flat = batch_indices.reshape(-1)
+
+        # Mask to keep indices within bounds
+        mask = (
+            (grid_x_flat >= 0)
+            & (grid_x_flat < self.image_size)
+            & (grid_y_flat >= 0)
+            & (grid_y_flat < self.image_size)
+        )
+
+        # Apply mask to indices and digits
+        batch_indices_flat = batch_indices_flat[mask]
+        grid_x_flat = grid_x_flat[mask]
+        grid_y_flat = grid_y_flat[mask]
+        digits_flat_flat = digits_flat_flat[mask]
+
+        # Use index_put_ with accumulate=True to add digit pixels to frames
+        frames.index_put_(
+            (batch_indices_flat, grid_y_flat, grid_x_flat),
+            digits_flat_flat,
+            accumulate=True,
+        )
 
         # Clip pixel values to [0, 1]
         frames = torch.clamp(frames, 0, 1)
@@ -248,19 +313,23 @@ class MovingMNISTEnv(BaseEnv):
 
     # --- Public methods ---
 
-    def reset(self, key=None):
+    def reset(self):
         """
         Public method to reset the environment.
-        """
-        env_state, observation = self._reset(key)
-        return env_state, observation
 
-    def step(self, env_state, action):
+        Returns:
+            observation: Dictionary containing:
+                - 'patch': Tensor of shape [batch_size, patch_size, patch_size]
+                - 'downsampled_frame': Tensor of shape [batch_size, 8, 8]
+        """
+        observation = self._reset()
+        return observation
+
+    def step(self, action):
         """
         Steps through the environment.
 
         Args:
-            env_state: Dictionary containing the current state of the environment.
             action: Dictionary with keys:
                 'delta_x': Tensor of shape [batch_size, 7], one-hot vectors representing shifts from -3 to +3 in X.
                 'delta_y': Tensor of shape [batch_size, 7], one-hot vectors representing shifts from -3 to +3 in Y.
@@ -268,15 +337,16 @@ class MovingMNISTEnv(BaseEnv):
                 'guess': Tensor of shape [batch_size], boolean flags (0 or 1).
 
         Returns:
-            env_state: Updated environment state.
-            observation: Tensor of shape [batch_size, patch_size, patch_size], image patches under the agent's position.
+            observation: Dictionary containing:
+                - 'patch': Tensor of shape [batch_size, patch_size, patch_size]
+                - 'downsampled_frame': Tensor of shape [batch_size, 8, 8]
             reward: Tensor of shape [batch_size], rewards for each environment in the batch.
             done: Tensor of shape [batch_size], boolean flags indicating if the episode is done.
         """
         # Extract components from action
         delta_x_action = action["delta_x"]  # Shape: [batch_size, 7]
         delta_y_action = action["delta_y"]  # Shape: [batch_size, 7]
-        guess_digits = action["digits"]  # Shape: [batch_size, num_digits]
+        guess_digits = action["digits"]  # Shape: [batch_size, self.num_digits]
         guess_flag = action["guess"]  # Shape: [batch_size]
 
         if isinstance(delta_x_action, np.ndarray):
@@ -323,11 +393,12 @@ class MovingMNISTEnv(BaseEnv):
         self.agent_pos[:, 1] = torch.clamp(self.agent_pos[:, 1], 0, self.grid_size - 1)
 
         # Get observation based on updated agent positions
-        observation = self._get_obs()  # Shape: [batch_size, patch_size, patch_size]
+        observation = (
+            self._get_obs()
+        )  # Dictionary containing 'patch' and 'downsampled_frame'
 
-        # Initialize reward and done tensors
+        # Initialize reward tensor
         reward = torch.zeros(self.batch_size, device=self.device)
-        done = torch.zeros(self.batch_size, dtype=torch.bool, device=self.device)
 
         # Process 'guess' flag
         guess_flag = guess_flag.bool()  # Convert to boolean tensor
@@ -346,7 +417,7 @@ class MovingMNISTEnv(BaseEnv):
             )
             # Assign rewards and done flags
             reward[guess_indices[correct_guess]] = 100.0
-            done[guess_indices[correct_guess]] = True
+            self.done[guess_indices[correct_guess]] = True
             reward[guess_indices[~correct_guess]] = -10.0
             # If incorrect guess, environment continues (done=False)
 
@@ -355,19 +426,20 @@ class MovingMNISTEnv(BaseEnv):
 
         # Check if episodes should end due to reaching num_frames
         reached_max_steps = self.current_step >= self.num_frames
-        done = done | reached_max_steps
+        self.done = self.done | reached_max_steps
+
+        # Copy of the done flags before resetting
+        done_flags = self.done.clone()
 
         # Reset environments that are done
-        if done.any():
-            self._reset_if_done(env_state, done)
+        if self.done.any():
+            self._reset_if_done()
 
         # Generate next frame for all environments
         self._generate_frame()
-        env_state["frames"] = self.frames
-        env_state["done"] = done
-        env_state["agent_pos"] = self.agent_pos
 
-        return env_state, observation, reward, done
+        # Return observation, reward, done_flags
+        return observation, reward, done_flags
 
     def render(self, idx=0):
         """

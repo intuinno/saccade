@@ -27,7 +27,10 @@ def main():
     )
 
     # Reset the environment
-    env_state, observation = env.reset()
+    observation = env.reset()
+    # Extract 'patch' and 'downsampled_frame' from the observation
+    patches = observation["patch"]  # Shape: [batch_size, patch_size, patch_size]
+    downsampled_frames = observation["downsampled_frame"]  # Shape: [batch_size, 8, 8]
 
     # Display parameters
     grid_rows = 2
@@ -48,8 +51,6 @@ def main():
     clock = pygame.time.Clock()
     fps = 5  # Default FPS
 
-    done = torch.zeros(env.batch_size, dtype=torch.bool, device=device)
-
     # Variables for FPS slider
     slider_width = 200
     slider_height = 20
@@ -68,7 +69,6 @@ def main():
     knob_x = slider_x + int((fps - min_fps) / (max_fps - min_fps) * slider_width)
     knob_y = slider_y + slider_height // 2
 
-    # Main loop
     running = True
     while running:
         # Event handling
@@ -129,7 +129,12 @@ def main():
         ] = 1  # Set one random delta in Y
 
         # Step the environment
-        env_state, observation, reward, done = env.step(env_state, actions)
+        observation, reward, done = env.step(actions)
+        # Extract 'patch' and 'downsampled_frame' from the observation
+        patches = observation["patch"]  # Shape: [batch_size, patch_size, patch_size]
+        downsampled_frames = observation[
+            "downsampled_frame"
+        ]  # Shape: [batch_size, 8, 8]
 
         # Clear the screen
         screen.fill((0, 0, 0))
@@ -160,7 +165,8 @@ def main():
             frame = env.frames[i].cpu().numpy()  # Shape: (image_size, image_size)
 
             # Resize the frame
-            frame_surface = pygame.surfarray.make_surface(np.uint8(frame * 255).T)
+            frame_rgb = np.repeat(frame[:, :, np.newaxis], 3, axis=2)
+            frame_surface = pygame.surfarray.make_surface(np.uint8(frame_rgb * 255))
             frame_surface = pygame.transform.scale(
                 frame_surface, (scaled_image_size, scaled_image_size)
             )
@@ -192,12 +198,39 @@ def main():
             )
             pygame.draw.rect(screen, agent_color, agent_rect, max(2, int(3 * scale)))
 
+            # Display the patch under the agent
+            # Let's display the patch at the top-left corner of each frame
+            scaled_patch_display_size = int(scaled_patch_size * 0.5)
+            patch_image = patches[i].cpu().numpy()
+            patch_image_rgb = np.repeat(patch_image[:, :, np.newaxis], 3, axis=2)
+            patch_surface = pygame.surfarray.make_surface(
+                np.uint8(patch_image_rgb * 255)
+            )
+            patch_surface = pygame.transform.scale(
+                patch_surface, (scaled_patch_display_size, scaled_patch_display_size)
+            )
+            screen.blit(patch_surface, (x_offset, y_offset))
+
+            # Optionally, display the downsampled frame (commented out here)
+            downsampled_image = downsampled_frames[i].cpu().numpy()
+            downsampled_image_rgb = np.repeat(
+                downsampled_image[:, :, np.newaxis], 3, axis=2
+            )
+            downsampled_surface = pygame.surfarray.make_surface(
+                np.uint8(downsampled_image_rgb * 255)
+            )
+            downsampled_surface = pygame.transform.scale(
+                downsampled_surface,
+                (scaled_patch_display_size, scaled_patch_display_size),
+            )
+            screen.blit(
+                downsampled_surface,
+                (x_offset + scaled_image_size - scaled_patch_display_size, y_offset),
+            )
+
             # Display the random guess
             guess_digits = actions["digits"][i].cpu().numpy()
-            if actions["guess"][i]:
-                guess_text = f"Pass"
-            else:
-                guess_text = f"Guess: {guess_digits[0]}, {guess_digits[1]}"
+            guess_text = f"Guess: {guess_digits[0]}, {guess_digits[1]}"
             text_surface = font.render(guess_text, True, (255, 255, 255))
             text_x = x_offset
             text_y = (
@@ -234,7 +267,9 @@ def main():
 
         # If all environments are done, reset
         if done.all():
-            env_state, observation = env.reset()
+            observation = env.reset()
+            patches = observation["patch"]
+            downsampled_frames = observation["downsampled_frame"]
 
     # Clean up
     pygame.quit()

@@ -43,17 +43,15 @@ class MovingMNISTEnv(BaseEnv):
         - 'guess': Tensor of shape [batch_size], boolean flags (0 or 1).
 
     The observation returned by the environment is now a dictionary containing:
-        - 'patch': Tensor of shape [batch_size, patch_size, patch_size], the image patches under the agent's position.
-        - 'downsampled_frame': Tensor of shape [batch_size, 8, 8], the 8x8 downsampled version of the whole Moving MNIST image.
+        - 'central': Tensor of shape [batch_size, patch_size, patch_size], the image patches under the agent's position.
+        - 'peripheral': Tensor of shape [batch_size, 8, 8], the 8x8 downsampled version of the whole Moving MNIST image.
+        - 'loc': Tensor of shape [batch_size,], the location of the agent position in number
     """
 
-    def __init__(
-        self, num_digits=2, image_size=64, num_frames=20, batch_size=32, device="cuda"
-    ):
+    def __init__(self, num_digits=2, image_size=64, batch_size=32, device="cuda"):
         super(MovingMNISTEnv, self).__init__()
         self.num_digits = num_digits  # Number of moving digits
         self.image_size = image_size  # Must be divisible by grid_size
-        self.num_frames = num_frames
         self.batch_size = batch_size
         self.device = device
 
@@ -124,10 +122,17 @@ class MovingMNISTEnv(BaseEnv):
             1
         )  # Shape: [batch_size, 8, 8]
 
+        # loc is a location of the focus
+        loc = self.agent_pos[:, 0] + self.agent_pos[:, 1]
+        loc = F.one_hot(loc, num_classes=16)
+        patches = torch.flatten(patches, start_dim=1)
+        downsampled_frames = torch.flatten(downsampled_frames, start_dim=1)
         # Return as a dictionary
         observation = {
-            "patch": patches,  # Shape: [batch_size, patch_size, patch_size]
-            "downsampled_frame": downsampled_frames,  # Shape: [batch_size, 8, 8]
+            "central": patches,  # Shape: [batch_size, patch_size, patch_size]
+            "peripheral": downsampled_frames,  # Shape: [batch_size, 8, 8]
+            "loc": loc,
+            "GT": frames,
         }
 
         return observation
@@ -347,7 +352,7 @@ class MovingMNISTEnv(BaseEnv):
         delta_x_action = action["delta_x"]  # Shape: [batch_size, 7]
         delta_y_action = action["delta_y"]  # Shape: [batch_size, 7]
         guess_digits = action["digits"]  # Shape: [batch_size, self.num_digits]
-        guess_flag = action["guess"]  # Shape: [batch_size]
+        guess_flag = action["guess"].squeeze()  # Shape: [batch_size]
 
         if isinstance(delta_x_action, np.ndarray):
             delta_x_action = torch.tensor(delta_x_action, device=self.device)
@@ -423,10 +428,6 @@ class MovingMNISTEnv(BaseEnv):
 
         # Increment current_step for all environments
         self.current_step += 1
-
-        # Check if episodes should end due to reaching num_frames
-        reached_max_steps = self.current_step >= self.num_frames
-        self.done = self.done | reached_max_steps
 
         # Copy of the done flags before resetting
         done_flags = self.done.clone()

@@ -661,6 +661,22 @@ class ACBehavior(nn.Module):
             self._updates += 1
 
 
+class RandomBehavior(nn.Module):
+    def __init__(self, config):
+        super(RandomBehavior, self).__init__()
+        self.config = config
+
+    def actor(self, feat):
+
+        dist = {
+            k: tools.OneHotDist(
+                torch.zeros(v).repeat(self.config.batch_size, 1).to(self.config.device)
+            )
+            for k, v in self.config.action_space.items()
+        }
+        return dist
+
+
 class SaccadeRandomBehavior(nn.Module):
     def __init__(self, config, act_space):
         super(SaccadeRandomBehavior, self).__init__()

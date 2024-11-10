@@ -10,7 +10,7 @@ import tools
 from cognitive_architecture import CognitiveArchitecture
 from datetime import datetime
 import pytz
-from envs.vec_sac_env import VecSaccadeEnvAdapter
+from envs.moving_mnist_env import MovingMNISTEnv
 
 
 def append_buffer(buffer, item):
@@ -55,10 +55,11 @@ def main(config):
     logdir.mkdir(parents=True, exist_ok=False)
 
     print("Create envs.")
-    vec_envs = VecSaccadeEnvAdapter(config.batch_size, config)
-    acts = vec_envs.action_space
+    vec_envs = MovingMNISTEnv(batch_size=config.batch_size, device=config.device)
+    acts = {"guess": 1, "digit1": 10, "digit2": 10, "delta_x": 7, "delta_y": 7}
     print("Action space", acts)
-    config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
+    config.num_actions = sum(k for k in acts.values())
+    config.action_space = acts
 
     config_backup = argparse.Namespace(**vars(config))
     config_backup.logdir = str(config.logdir)
@@ -96,14 +97,17 @@ def main(config):
                 buffer["obs"] = []
                 obs = vec_envs.reset()
                 for _ in range(config.batch_length):
-                    action, logprob, actor_ent = model.get_action(feat)
-                    detached_action = action.detach().clone()
-                    obs, _, _, _ = vec_envs.step(detached_action)
-                    feat = model.wm_step(detached_action, obs)
+                    action, _, _ = model.get_action(feat)
+                    detached_action = {k: v.detach().clone() for k, v in action.items()}
+                    obs, _, _ = vec_envs.step(detached_action)
+                    del detached_action["digits"]
+                    flat_action = torch.concat(list(detached_action.values()), dim=1)
+
+                    feat = model.wm_step(flat_action, obs)
                     buffer["feat"].append(feat)
-                    buffer["action"].append(action)
-                    buffer["logprob"].append(logprob)
-                    buffer["actor_ent"].append(actor_ent)
+                    buffer["action"].append(flat_action)
+                    # buffer["logprob"].append(logprob)
+                    # buffer["actor_ent"].append(actor_ent)
                     buffer["obs"].append(obs)
 
                 # batch["reward"] = model.calculate_reward(batch)
@@ -136,20 +140,26 @@ def main(config):
             obs = vec_envs.reset()
             for _ in range(config.eval_obs_length):
                 action, _, _ = model.get_action(feat)
-                detached_action = action.detach().clone()
-                obs, _, _, _ = vec_envs.step(detached_action)
+                detached_action = {k: v.detach().clone() for k, v in action.items()}
+                obs, _, _ = vec_envs.step(detached_action)
+                del detached_action["digits"]
+                flat_action = torch.concat(list(detached_action.values()), dim=1)
+
                 central_obs = model.wm.scan_central()
-                feat = model.wm_step(detached_action, obs)
+                feat = model.wm_step(flat_action, obs)
                 buffer["central_obs"].append(central_obs)
                 buffer["obs"].append(obs)
 
             with tools.ImagineMode(model.wm):
                 for _ in range(config.eval_img_length):
                     action, _, _ = model.get_action(feat)
-                    detached_action = action.detach().clone()
-                    obs, _, _, _ = vec_envs.step(detached_action)
+                    detached_action = {k: v.detach().clone() for k, v in action.items()}
+                    obs, _, _ = vec_envs.step(detached_action)
+                    del detached_action["digits"]
+                    flat_action = torch.concat(list(detached_action.values()), dim=1)
+
                     central_obs = model.wm.scan_central()
-                    feat = model.wm_step(detached_action, obs)
+                    feat = model.wm_step(flat_action, obs)
                     buffer["central_obs"].append(central_obs)
                     buffer["obs"].append(obs)
 

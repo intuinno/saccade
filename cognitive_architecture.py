@@ -275,10 +275,12 @@ class HierarchicalWorldModel(nn.Module):
             configs=configs,
         )
 
+        num_actions = sum(k for k in configs.action_space.values())
+
         modules["top_module"] = LocalModule(
             "top_module",
             lowers=[modules["peripheral_module"], modules["assoc_module"]],
-            context_size=configs.num_actions,
+            context_size=num_actions,
             configs=configs,
         )
         self.local_modules = nn.ModuleDict(modules)
@@ -308,7 +310,7 @@ class HierarchicalWorldModel(nn.Module):
 
     def scan_central(self):
         patches = []
-        for a in range(self.configs.num_actions):
+        for a in range(16):
             a = torch.LongTensor([a]).to(self.configs.device)
             action = torch.nn.functional.one_hot(
                 a, num_classes=self.configs.num_actions
@@ -349,7 +351,7 @@ class CognitiveArchitecture(nn.Module):
         super(CognitiveArchitecture, self).__init__()
         self.configs = configs
         self.wm = HierarchicalWorldModel(configs)
-        self.behavior = models.ACBehavior(configs)
+        self.behavior = models.RandomBehavior(configs)
         if configs.dyn_discrete:
             feat_size = configs.dyn_stoch * configs.dyn_discrete + configs.dyn_deter
         else:
@@ -371,9 +373,14 @@ class CognitiveArchitecture(nn.Module):
 
     def get_action(self, feat):
         actor = self.behavior.actor(feat)
-        action = actor.sample()
-        logprob = actor.log_prob(action)
-        actor_ent = actor.entropy()
+        action = {k: v.sample() for k, v in actor.items()}
+        logprob = {k: v.log_prob(action[k]) for k, v in actor.items()}
+        actor_ent = {k: v.entropy() for k, v in actor.items()}
+
+        digit1 = torch.argmax(action["digit1"], dim=1)
+        digit2 = torch.argmax(action["digit2"], dim=1)
+        digits = torch.stack((digit1, digit2), dim=1)
+        action["digits"] = digits
         return action, logprob, actor_ent
 
     def wm_step(self, action, obs):

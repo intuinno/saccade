@@ -98,42 +98,8 @@ defaults:
   # L2HWM
   tmp_abs_factor: 1
 
-sac-013-rev0:
-  exp_name: 'sac-013-rev0'
-  intrinsic_reward: 'prediction_error'
-  behavior: 'vanilla_AC'
-  dyn_hidden: 32
-  dyn_deter: 32
-  dyn_stoch: 8
-  dyn_discrete: 8
-  enc_emb_size: 64
-  dec_emb_size: 64
-
-sac-013-rev1:
-  exp_name: 'sac-013-rev1'
-  intrinsic_reward: 'prediction_error'
-  behavior: 'vanilla_AC'
-  dyn_hidden: 512
-  dyn_deter: 512
-  dyn_stoch: 32
-  dyn_discrete: 32
-  enc_emb_size: 1024
-  dec_emb_size: 1024
-    
-sac-013-rev2-large:
-  exp_name: 'sac-013-rev2-large'
-  intrinsic_reward: 'prediction_error'
-  behavior: 'vanilla_AC'
-  dyn_hidden: 512
-  dyn_deter: 512
-  dyn_stoch: 32
-  dyn_discrete: 32
-  enc_emb_size: 1024
-  dec_emb_size: 1024
-  batch_size: 256
-
-sac-013-rev2-small:
-  exp_name: 'sac-013-rev2-small'
+sac-014-rev0:
+  exp_name: 'sac-014-rev0'
   intrinsic_reward: 'prediction_error'
   behavior: 'vanilla_AC'
   dyn_hidden: 32

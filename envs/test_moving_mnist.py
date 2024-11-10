@@ -21,7 +21,7 @@ def main():
     env = MovingMNISTEnv(
         num_digits=num_digits,
         image_size=image_size,
-        num_frames=num_frames,
+        # num_frames=num_frames,
         batch_size=batch_size,
         device=device,
     )

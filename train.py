@@ -100,7 +100,6 @@ def main(config):
                     action, _, _ = model.get_action(feat)
                     detached_action = {k: v.detach().clone() for k, v in action.items()}
                     obs, _, _ = vec_envs.step(detached_action)
-                    del detached_action["digits"]
                     flat_action = torch.concat(list(detached_action.values()), dim=1)
 
                     feat = model.wm_step(flat_action, obs)
@@ -142,7 +141,6 @@ def main(config):
                 action, _, _ = model.get_action(feat)
                 detached_action = {k: v.detach().clone() for k, v in action.items()}
                 obs, _, _ = vec_envs.step(detached_action)
-                del detached_action["digits"]
                 flat_action = torch.concat(list(detached_action.values()), dim=1)
 
                 central_obs = model.wm.scan_central()
@@ -155,7 +153,6 @@ def main(config):
                     action, _, _ = model.get_action(feat)
                     detached_action = {k: v.detach().clone() for k, v in action.items()}
                     obs, _, _ = vec_envs.step(detached_action)
-                    del detached_action["digits"]
                     flat_action = torch.concat(list(detached_action.values()), dim=1)
 
                     central_obs = model.wm.scan_central()

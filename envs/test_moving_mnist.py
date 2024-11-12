@@ -29,8 +29,8 @@ def main():
     # Reset the environment
     observation = env.reset()
     # Extract 'patch' and 'downsampled_frame' from the observation
-    patches = observation["patch"]  # Shape: [batch_size, patch_size, patch_size]
-    downsampled_frames = observation["downsampled_frame"]  # Shape: [batch_size, 8, 8]
+    patches = observation["central"]  # Shape: [batch_size, patch_size, patch_size]
+    downsampled_frames = observation["peripheral"]  # Shape: [batch_size, 8, 8]
 
     # Display parameters
     grid_rows = 2
@@ -49,7 +49,7 @@ def main():
 
     # Clock object to control the frame rate
     clock = pygame.time.Clock()
-    fps = 5  # Default FPS
+    fps = 1  # Default FPS
 
     # Variables for FPS slider
     slider_width = 200
@@ -112,29 +112,31 @@ def main():
         actions = {
             "delta_x": torch.zeros(env.batch_size, 7, device=device),
             "delta_y": torch.zeros(env.batch_size, 7, device=device),
-            "digits": torch.randint(
-                0, 10, (env.batch_size, env.num_digits), device=device
-            ),
-            "guess": torch.randint(0, 2, (env.batch_size,), device=device),
+            "digit1": torch.zeros(env.batch_size, 10, device=device),
+            "digit2": torch.zeros(env.batch_size, 10, device=device),
+            "guess": torch.randint(0, 2, (env.batch_size, 1), device=device),
         }
 
         # Randomly select a delta for each environment
         delta_indices_x = torch.randint(0, 7, (env.batch_size,), device=device)
         delta_indices_y = torch.randint(0, 7, (env.batch_size,), device=device)
+        digit1_indices = torch.randint(0, 10, (env.batch_size,), device=device)
+        digit2_indices = torch.randint(0, 10, (env.batch_size,), device=device)
         actions["delta_x"][
             torch.arange(env.batch_size), delta_indices_x
         ] = 1  # Set one random delta in X
         actions["delta_y"][
             torch.arange(env.batch_size), delta_indices_y
         ] = 1  # Set one random delta in Y
+        actions["digit1"][torch.arange(env.batch_size), digit1_indices] = 1
+        actions["digit2"][torch.arange(env.batch_size), digit2_indices] = 1
 
         # Step the environment
         observation, reward, done = env.step(actions)
         # Extract 'patch' and 'downsampled_frame' from the observation
-        patches = observation["patch"]  # Shape: [batch_size, patch_size, patch_size]
-        downsampled_frames = observation[
-            "downsampled_frame"
-        ]  # Shape: [batch_size, 8, 8]
+        patches = observation["central"]  # Shape: [batch_size, patch_size, patch_size]
+        downsampled_frames = observation["peripheral"]  # Shape: [batch_size, 8, 8]
+        locs = observation["loc"]
 
         # Clear the screen
         screen.fill((0, 0, 0))
@@ -202,6 +204,8 @@ def main():
             # Let's display the patch at the top-left corner of each frame
             scaled_patch_display_size = int(scaled_patch_size * 0.5)
             patch_image = patches[i].cpu().numpy()
+            patch_image = patch_image.reshape(16, 16)
+
             patch_image_rgb = np.repeat(patch_image[:, :, np.newaxis], 3, axis=2)
             patch_surface = pygame.surfarray.make_surface(
                 np.uint8(patch_image_rgb * 255)
@@ -213,6 +217,7 @@ def main():
 
             # Optionally, display the downsampled frame (commented out here)
             downsampled_image = downsampled_frames[i].cpu().numpy()
+            downsampled_image = downsampled_image.reshape(8, 8)
             downsampled_image_rgb = np.repeat(
                 downsampled_image[:, :, np.newaxis], 3, axis=2
             )
@@ -229,8 +234,14 @@ def main():
             )
 
             # Display the random guess
-            guess_digits = actions["digits"][i].cpu().numpy()
-            guess_text = f"Guess: {guess_digits[0]}, {guess_digits[1]}"
+            loc = locs[i].cpu().numpy()
+            loc = np.argmax(loc)
+            # guess_digits = actions["digits"][i].cpu().numpy()
+            dx = actions["delta_x"][i].cpu().numpy()
+            dx = np.argmax(dx) - 3
+            dy = actions["delta_y"][i].cpu().numpy()
+            dy = np.argmax(dy) - 3
+            guess_text = f"LOC: {loc}, dx:{dx}, dy:{dy}"
             text_surface = font.render(guess_text, True, (255, 255, 255))
             text_x = x_offset
             text_y = (
@@ -268,8 +279,8 @@ def main():
         # If all environments are done, reset
         if done.all():
             observation = env.reset()
-            patches = observation["patch"]
-            downsampled_frames = observation["downsampled_frame"]
+            patches = observation["central"]
+            downsampled_frames = observation["peripheral"]
 
     # Clean up
     pygame.quit()

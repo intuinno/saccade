@@ -39,7 +39,8 @@ class MovingMNISTEnv(BaseEnv):
     The action includes:
         - 'delta_x': Tensor of shape [batch_size, 7], one-hot vectors representing shifts from -3 to +3 in X.
         - 'delta_y': Tensor of shape [batch_size, 7], one-hot vectors representing shifts from -3 to +3 in Y.
-        - 'digits': Tensor of shape [batch_size, 2], integers between 0 and 9 (guessed digits).
+        - 'digit1': Tensor of shape [batch_size, 10], one-hot vectors representing integers between 0 and 9 (guessed digit 1).
+        - 'digit2': Tensor of shape batch_size, 10], one-hot vectors representing integers between 0 and 9 (guessed digit 2)
         - 'guess': Tensor of shape [batch_size], boolean flags (0 or 1).
 
     The observation returned by the environment is now a dictionary containing:
@@ -123,7 +124,7 @@ class MovingMNISTEnv(BaseEnv):
         )  # Shape: [batch_size, 8, 8]
 
         # loc is a location of the focus
-        loc = self.agent_pos[:, 0] + self.agent_pos[:, 1]
+        loc = self.agent_pos[:, 0] + self.agent_pos[:, 1] * 4
         loc = F.one_hot(loc, num_classes=16)
         patches = torch.flatten(patches, start_dim=1)
         downsampled_frames = torch.flatten(downsampled_frames, start_dim=1)
@@ -338,21 +339,26 @@ class MovingMNISTEnv(BaseEnv):
             action: Dictionary with keys:
                 'delta_x': Tensor of shape [batch_size, 7], one-hot vectors representing shifts from -3 to +3 in X.
                 'delta_y': Tensor of shape [batch_size, 7], one-hot vectors representing shifts from -3 to +3 in Y.
-                'digits': Tensor of shape [batch_size, 2], integers between 0 and 9 (guessed digits).
+                'digit1': Tensor of shape [batch_size, 10], one-hot vectors representing integers between 0 and 9 (guessed digit 1).
+                'digit2': Tensor of shape batch_size, 10], one-hot vectors representing integers between 0 and 9 (guessed digit 2)
                 'guess': Tensor of shape [batch_size], boolean flags (0 or 1).
 
         Returns:
             observation: Dictionary containing:
-                - 'patch': Tensor of shape [batch_size, patch_size, patch_size]
-                - 'downsampled_frame': Tensor of shape [batch_size, 8, 8]
+                - 'central': Tensor of shape [batch_size, patch_size x patch_size]
+                - 'peripheral': Tensor of shape [batch_size, 8 x 8]
+                - 'loc': One hot vector of shape [batch_size, 16] representing location
+                -' GT': Ground-truth image
             reward: Tensor of shape [batch_size], rewards for each environment in the batch.
             done: Tensor of shape [batch_size], boolean flags indicating if the episode is done.
         """
         # Extract components from action
         delta_x_action = action["delta_x"]  # Shape: [batch_size, 7]
         delta_y_action = action["delta_y"]  # Shape: [batch_size, 7]
-        guess_digits = action["digits"]  # Shape: [batch_size, self.num_digits]
-        guess_flag = action["guess"].squeeze()  # Shape: [batch_size]
+        digit1 = torch.argmax(action["digit1"], dim=1)
+        digit2 = torch.argmax(action["digit2"], dim=1)
+        guess_digits = torch.stack((digit1, digit2), dim=1)
+        guess_flag = action["guess"].squeeze(dim=1)  # Shape: [batch_size]
 
         if isinstance(delta_x_action, np.ndarray):
             delta_x_action = torch.tensor(delta_x_action, device=self.device)

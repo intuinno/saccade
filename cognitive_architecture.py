@@ -377,18 +377,18 @@ class CognitiveArchitecture(nn.Module):
         logprob = {k: v.log_prob(action[k]) for k, v in actor.items()}
         actor_ent = {k: v.entropy() for k, v in actor.items()}
 
-        digit1 = torch.argmax(action["digit1"], dim=1)
-        digit2 = torch.argmax(action["digit2"], dim=1)
-        digits = torch.stack((digit1, digit2), dim=1)
-        action["digits"] = digits
         return action, logprob, actor_ent
 
     def wm_step(self, action, obs):
         return self.wm.step(action, obs)
 
     def train(self, batch):
+        metrics = {}
         # Train Hierarchical Worldmodel
-        return self.wm.train()
+        met, recon = self.wm.train()
+        metrics.update(met)
+        # met = self.behavior_train()
+        return met, recon
 
     def train_video(self, batch):
         feats = batch["feat"][1:]

@@ -56,10 +56,8 @@ def main(config):
 
     print("Create envs.")
     vec_envs = MovingMNISTEnv(batch_size=config.batch_size, device=config.device)
-    acts = {"guess": 1, "digit1": 10, "digit2": 10, "delta_x": 7, "delta_y": 7}
-    print("Action space", acts)
-    config.num_actions = sum(k for k in acts.values())
-    config.action_space = acts
+    print("Action space", config.action_space)
+    config.num_actions = sum(k for k in config.action_space.values())
 
     config_backup = argparse.Namespace(**vars(config))
     config_backup.logdir = str(config.logdir)
@@ -91,33 +89,35 @@ def main(config):
             with tools.RequiresGrad(model):
                 buffer = {}
                 buffer["feat"] = [feat]
-                buffer["action"] = []
+                # buffer["action"] = []
                 buffer["logprob"] = []
                 buffer["actor_ent"] = []
-                buffer["obs"] = []
+                obs_buffer = []
+                buffer["reward"] = []
                 obs = vec_envs.reset()
                 for _ in range(config.batch_length):
-                    action, _, _ = model.get_action(feat)
+                    action, logprob, actor_ent = model.get_action(feat)
                     detached_action = {k: v.detach().clone() for k, v in action.items()}
-                    obs, _, _ = vec_envs.step(detached_action)
+                    obs, reward, _ = vec_envs.step(detached_action)
                     flat_action = torch.concat(list(detached_action.values()), dim=1)
 
                     feat = model.wm_step(flat_action, obs)
                     buffer["feat"].append(feat)
-                    buffer["action"].append(flat_action)
-                    # buffer["logprob"].append(logprob)
-                    # buffer["actor_ent"].append(actor_ent)
-                    buffer["obs"].append(obs)
+                    # buffer["action"].append(flat_action)
+                    buffer["logprob"].append(logprob)
+                    buffer["actor_ent"].append(actor_ent)
+                    obs_buffer.append(obs)
+                    buffer["reward"].append(reward)
 
-                # batch["reward"] = model.calculate_reward(batch)
                 # met = model.train(batch)
-                met, recon = model.train(buffer)
+                batch = build_batch_behavior(buffer)
+                met, recon = model.train(batch)
                 for name, values in met.items():
                     if not name in metrics.keys():
                         metrics[name] = [values]
                     else:
                         metrics[name].append(values)
-                video_loss, train_video = model.train_video(buffer)
+                video_loss, train_video = model.train_video(buffer, obs_buffer)
                 logger.video("top_video", train_video)
                 logger.scalar("video_loss", float(video_loss))
 
@@ -127,7 +127,7 @@ def main(config):
             metrics[name] = []
             logger.write(fps=True, step=epoch)
         if epoch % config.train_gif_every == 0:
-            openl = model.decode_video(recon, buffer)
+            openl = model.decode_video(recon, obs_buffer)
             for name, vid in openl.items():
                 logger.video(f"{name}-video", vid)
             # Build a video from imaginary central module

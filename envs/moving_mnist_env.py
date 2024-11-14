@@ -341,7 +341,7 @@ class MovingMNISTEnv(BaseEnv):
                 'delta_y': Tensor of shape [batch_size, 7], one-hot vectors representing shifts from -3 to +3 in Y.
                 'digit1': Tensor of shape [batch_size, 10], one-hot vectors representing integers between 0 and 9 (guessed digit 1).
                 'digit2': Tensor of shape batch_size, 10], one-hot vectors representing integers between 0 and 9 (guessed digit 2)
-                'guess': Tensor of shape [batch_size], boolean flags (0 or 1).
+                'guess': Tensor of shape [batch_size, 2], one-hot vectors representing boolean flags (0 or 1).
 
         Returns:
             observation: Dictionary containing:
@@ -358,7 +358,8 @@ class MovingMNISTEnv(BaseEnv):
         digit1 = torch.argmax(action["digit1"], dim=1)
         digit2 = torch.argmax(action["digit2"], dim=1)
         guess_digits = torch.stack((digit1, digit2), dim=1)
-        guess_flag = action["guess"].squeeze(dim=1)  # Shape: [batch_size]
+        guess_flag = torch.argmax(action["guess"], dim=1)
+        guess_flag = action["guess"]  # Shape: [batch_size]
 
         if isinstance(delta_x_action, np.ndarray):
             delta_x_action = torch.tensor(delta_x_action, device=self.device)
@@ -384,7 +385,8 @@ class MovingMNISTEnv(BaseEnv):
         ), f"Expected guess_digits shape ({self.batch_size}, {self.num_digits}), got {guess_digits.shape}"
         assert guess_flag.shape == (
             self.batch_size,
-        ), f"Expected guess_flag shape ({self.batch_size},), got {guess_flag.shape}"
+            2,
+        ), f"Expected guess_flag shape ({self.batch_size},2), got {guess_flag.shape}"
 
         # Map one-hot vectors to deltas (-3 to +3)
         delta_values = torch.arange(-3, 4, device=self.device)

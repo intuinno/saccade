@@ -351,7 +351,7 @@ class CognitiveArchitecture(nn.Module):
         super(CognitiveArchitecture, self).__init__()
         self.configs = configs
         self.wm = HierarchicalWorldModel(configs)
-        self.behavior = models.RandomBehavior(configs)
+        self.behavior = models.ACBehavior(configs)
         if configs.dyn_discrete:
             feat_size = configs.dyn_stoch * configs.dyn_discrete + configs.dyn_deter
         else:
@@ -375,7 +375,9 @@ class CognitiveArchitecture(nn.Module):
         actor = self.behavior.actor(feat)
         action = {k: v.sample() for k, v in actor.items()}
         logprob = {k: v.log_prob(action[k]) for k, v in actor.items()}
+        logprob = sum(logprob.values())
         actor_ent = {k: v.entropy() for k, v in actor.items()}
+        actor_ent = sum(actor_ent.values())
 
         return action, logprob, actor_ent
 
@@ -387,16 +389,19 @@ class CognitiveArchitecture(nn.Module):
         # Train Hierarchical Worldmodel
         met, recon = self.wm.train()
         metrics.update(met)
-        # met = self.behavior_train()
-        return met, recon
+        met = self.behavior._train(batch)
+        metrics.update(met)
+        return metrics, recon
 
-    def train_video(self, batch):
+    def train_video(self, batch, obs):
         feats = batch["feat"][1:]
-        feats = torch.stack(feats, dim=1)
+        # feats = torch.stack(feats, dim=1)
         # feats = einops.rearrange(feats, "B T C -> (B T) C")
+
         with tools.RequiresGrad(self.video_decoder):
             recon = self.video_decoder(feats)
-            gt = [o["GT"] for o in batch["obs"]]
+            recon = einops.rearrange(recon, "T B W H C -> B T W H C")
+            gt = [o["GT"] for o in obs]
             gt = torch.stack(gt, dim=1)
             gt = einops.rearrange(gt, "B T W H -> B T W H 1")
             loss = self.video_loss(recon, gt)
@@ -411,7 +416,7 @@ class CognitiveArchitecture(nn.Module):
         # Peripheral vision video
         peri_recon = recon[target_feeder]
         peri_recon = einops.rearrange(peri_recon, "b t (w h) -> b t w h 1", w=width)
-        peri_gt = [o[target_obs] for o in buffer["obs"]]
+        peri_gt = [o[target_obs] for o in buffer]
         peri_gt = torch.stack(peri_gt, dim=1)[:6]
         peri_gt = einops.rearrange(peri_gt, "b t (w h) -> b t w h 1", w=width)
         peri_gt = to_np(peri_gt)

@@ -528,7 +528,7 @@ class ACBehavior(nn.Module):
             feat_size = config.dyn_stoch + config.dyn_deter
         self.actor = networks.MLP(
             feat_size,
-            (config.num_actions,),
+            config.action_space,
             config.actor["layers"],
             config.units,
             config.actor["act"],
@@ -596,20 +596,15 @@ class ACBehavior(nn.Module):
 
         # Actor update
         lambda_returns = torch.empty_like(batch["reward"]).to(self._config.device)
-
-        feat = batch["post"]["feat"].detach()
-        shifted_feat = torch.cat(
-            [feat[:-1], torch.unsqueeze(batch["init_state"]["feat"], 0)]
-        )
-
+        feat = batch["feat"]
+        rewards = batch["reward"]
         critic = self._slow_value
-
         slow_values = critic(feat).mode().squeeze()
-        shifted_values = critic(shifted_feat).mode().squeeze()
 
+        # Calculate lambda return
         last_return = slow_values[-1]
-        for i in reversed(range(len(feat))):
-            new_return = batch["reward"][i] + self._config.discount_gamma * (
+        for i in reversed(range(len(rewards))):
+            new_return = rewards[i] + self._config.discount_gamma * (
                 ((1 - self._config.discount_lambda) * slow_values[i])
                 + self._config.discount_lambda * last_return
             )
@@ -619,7 +614,7 @@ class ACBehavior(nn.Module):
         actor_ent = batch["actor_ent"]
         offset, scale = self.reward_ema(lambda_returns, self.ema_vals)
         normed_target = (lambda_returns - offset) / scale
-        normed_base = (shifted_values - offset) / scale
+        normed_base = (slow_values[:-1] - offset) / scale
         adv = normed_target - normed_base
         metrics.update(tools.tensorstats(normed_target, "normed_target"))
         metrics["EMA_005"] = to_np(self.ema_vals[0])
@@ -630,25 +625,27 @@ class ACBehavior(nn.Module):
         actor_loss = torch.mean(actor_loss)
 
         # Critic update
-        value = self.value(shifted_feat.detach())
+        value = self.value(feat[:-1].detach())
         value_loss = -value.log_prob(lambda_returns.detach())
         value_loss = torch.mean(value_loss)
 
         metrics.update(tools.tensorstats(value.mode(), "value"))
         metrics.update(tools.tensorstats(lambda_returns, "target"))
         metrics.update(tools.tensorstats(batch["reward"], "batch_reward"))
-        if self._config.actor["dist"] in ["onehot"]:
-            metrics.update(
-                tools.tensorstats(
-                    torch.argmax(batch["action"], dim=-1).float(), "batch_action"
-                )
-            )
-        else:
-            metrics.update(tools.tensorstats(batch["action"], "batch_action"))
+        # if self._config.actor["dist"] in ["onehot"]:
+        #     metrics.update(
+        #         tools.tensorstats(
+        #             torch.argmax(batch["action"], dim=-1).float(), "batch_action"
+        #         )
+        #     )
+        # else:
+        #     metrics.update(tools.tensorstats(batch["action"], "batch_action"))
         metrics["actor_entropy"] = to_np(torch.mean(actor_ent))
-        metrics.update(self._actor_opt(actor_loss, self.actor.parameters()))
-        metrics.update(
-            self._value_opt(value_loss, self.value.parameters(), retain_graph=False)
+        metrics["grad_norm_actor"] = self._actor_opt(
+            actor_loss, self.actor.parameters()
+        )
+        metrics["grad_norm_critic"] = self._value_opt(
+            value_loss, self.value.parameters(), retain_graph=False
         )
         return metrics
 

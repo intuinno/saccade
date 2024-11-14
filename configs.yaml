@@ -136,6 +136,8 @@ sac-014-rev1:
   dyn_discrete: 8
   enc_emb_size: 64
   dec_emb_size: 64
+  batch_length: 256
+  batch_size: 64
 
 debug:
   debug: True

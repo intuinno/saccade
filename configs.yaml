@@ -5,8 +5,8 @@ defaults:
   eval_batch_size: 512
   exp_name: "default"
   logdir: "logs"
-  load_model: "models/sac-013-rev2-large_16200.pt"
-  # load_model: ''
+    #  load_model: "models/sac-013-rev2-large_16200.pt"
+  load_model: ''
   seed: 0
   deterministic_run: True
   steps: 1e9
@@ -126,8 +126,8 @@ defaults:
   # L2HWM
   tmp_abs_factor: 1
 
-sac-014-rev0:
-  exp_name: "sac-014-rev0"
+sac-014-rev1:
+  exp_name: "sac-014-rev1"
   intrinsic_reward: "prediction_error"
   behavior: "vanilla_AC"
   dyn_hidden: 32

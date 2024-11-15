@@ -120,6 +120,7 @@ def main(config):
                 video_loss, train_video = model.train_video(buffer, obs_buffer)
                 logger.video("top_video", train_video)
                 logger.scalar("video_loss", float(video_loss))
+                logger.scalar("train_batch_mean_reward", batch["reward"].mean().cpu())
 
         # Write training summary
         for name, values in metrics.items():

@@ -141,10 +141,10 @@ def main(config):
             for _ in range(config.eval_obs_length):
                 action, _, _ = model.get_action(feat)
                 detached_action = {k: v.detach().clone() for k, v in action.items()}
+                central_obs = model.wm.scan_central(detached_action.copy(), obs["loc"])
+
                 obs, _, _ = vec_envs.step(detached_action)
                 flat_action = torch.concat(list(detached_action.values()), dim=1)
-
-                central_obs = model.wm.scan_central()
                 feat = model.wm_step(flat_action, obs)
                 buffer["central_obs"].append(central_obs)
                 buffer["obs"].append(obs)
@@ -153,10 +153,12 @@ def main(config):
                 for _ in range(config.eval_img_length):
                     action, _, _ = model.get_action(feat)
                     detached_action = {k: v.detach().clone() for k, v in action.items()}
+                    central_obs = model.wm.scan_central(
+                        detached_action.copy(), obs["loc"]
+                    )
+
                     obs, _, _ = vec_envs.step(detached_action)
                     flat_action = torch.concat(list(detached_action.values()), dim=1)
-
-                    central_obs = model.wm.scan_central()
                     feat = model.wm_step(flat_action, obs)
                     buffer["central_obs"].append(central_obs)
                     buffer["obs"].append(obs)

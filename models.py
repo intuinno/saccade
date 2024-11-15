@@ -620,7 +620,7 @@ class ACBehavior(nn.Module):
         metrics["EMA_005"] = to_np(self.ema_vals[0])
         metrics["EMA_095"] = to_np(self.ema_vals[1])
 
-        actor_loss = batch["logprob"] * adv.detach()
+        actor_loss = -batch["logprob"] * adv.detach()
         actor_loss -= self._config.actor["entropy"] * actor_ent
         actor_loss = torch.mean(actor_loss)
 

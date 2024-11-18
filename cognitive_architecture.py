@@ -276,7 +276,8 @@ class HierarchicalWorldModel(nn.Module):
             configs=configs,
         )
 
-        num_actions = sum(k for k in configs.action_space.values())
+        # num_actions = sum(k for k in configs.action_space.values())
+        num_actions = 16
 
         modules["top_module"] = LocalModule(
             "top_module",
@@ -309,28 +310,45 @@ class HierarchicalWorldModel(nn.Module):
         feat = m[module_name].dynamics.get_feat(prior)
         return feat
 
-    def scan_central(self, original_action, original_loc):
-        patches = []
-        loc = torch.argmax(original_loc, dim=1)
-        x = loc % 4
-        y = loc // 4
-        offset_x = -x + 3
-        offset_y = -y + 3
-        for dy in range(4):
-            for dx in range(4):
-                delta_x = dx + offset_x
-                delta_y = dy + offset_y
-                delta_x = F.one_hot(delta_x, num_classes=7).to(self.configs.device)
-                delta_y = F.one_hot(delta_y, num_classes=7).to(self.configs.device)
-                original_action["delta_x"] = delta_x
-                original_action["delta_y"] = delta_y
-                flat_action = torch.concat(list(original_action.values()), dim=1)
+    # def scan_central(self, original_action, original_loc):
+    #     patches = []
+    #     loc = torch.argmax(original_loc, dim=1)
+    #     x = loc % 4
+    #     y = loc // 4
+    #     offset_x = -x + 3
+    #     offset_y = -y + 3
+    #     for dy in range(4):
+    #         for dx in range(4):
+    #             delta_x = dx + offset_x
+    #             delta_y = dy + offset_y
+    #             delta_x = F.one_hot(delta_x, num_classes=7).to(self.configs.device)
+    #             delta_y = F.one_hot(delta_y, num_classes=7).to(self.configs.device)
+    #             original_action["delta_x"] = delta_x
+    #             original_action["delta_y"] = delta_y
+    #             flat_action = torch.concat(list(original_action.values()), dim=1)
 
-                top_feat = self.get_feat_from_module("top_module", flat_action)
-                assoc_feat = self.get_feat_from_module("assoc_module", top_feat)
-                central_feat = self.get_feat_from_module("central_module", assoc_feat)
-                patch = self.local_modules["central_module"].decoder(central_feat)
-                patches.append(patch["central-feeder"].mode().detach())
+    #             top_feat = self.get_feat_from_module("top_module", flat_action)
+    #             assoc_feat = self.get_feat_from_module("assoc_module", top_feat)
+    #             central_feat = self.get_feat_from_module("central_module", assoc_feat)
+    #             patch = self.local_modules["central_module"].decoder(central_feat)
+    #             patches.append(patch["central-feeder"].mode().detach())
+    #     recon = torch.stack(patches, dim=1)
+    #     image = einops.rearrange(
+    #         recon, "b (w1 h1) (w2 h2) -> b (w1 w2) (h1 h2)", w1=4, w2=16
+    #     )
+    #     return image
+
+    def scan_central(self):
+        patches = []
+        for a in range(16):
+            a = torch.LongTensor([a]).to(self.configs.device)
+            action = torch.nn.functional.one_hot(a, num_classes=16)
+            action = einops.repeat(action, "1 c -> b c", b=self.configs.batch_size)
+            top_feat = self.get_feat_from_module("top_module", action)
+            assoc_feat = self.get_feat_from_module("assoc_module", top_feat)
+            central_feat = self.get_feat_from_module("central_module", assoc_feat)
+            patch = self.local_modules["central_module"].decoder(central_feat)
+            patches.append(patch["central-feeder"].mode().detach())
         recon = torch.stack(patches, dim=1)
         image = einops.rearrange(
             recon, "b (w1 h1) (w2 h2) -> b (w1 w2) (h1 h2)", w1=4, w2=16

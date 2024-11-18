@@ -5,6 +5,7 @@ import torch
 import pathlib
 import sys
 from tqdm import tqdm
+from torch.nn import functional as F
 
 import tools
 from cognitive_architecture import CognitiveArchitecture
@@ -33,6 +34,18 @@ def build_batch_behavior(buffer):
         else:
             buffer[key] = torch.stack(buffer[key])
     return buffer
+
+
+def get_location(action, obs):
+    current_x = torch.argmax(obs["loc"], dim=1) % 4
+    current_y = torch.argmax(obs["loc"], dim=1) // 4
+    delta_x = torch.argmax(action["delta_x"], dim=1) - 3
+    delta_y = torch.argmax(action["delta_y"], dim=1) - 3
+    loc_x = torch.clip(current_x + delta_x, 0, 3)
+    loc_y = torch.clip(current_y + delta_y, 0, 3)
+    loc = loc_x + loc_y * 4
+    flat_action = F.one_hot(loc, num_classes=16)
+    return flat_action
 
 
 def main(config):
@@ -98,8 +111,8 @@ def main(config):
                 for _ in range(config.batch_length):
                     action, logprob, actor_ent = model.get_action(feat)
                     detached_action = {k: v.detach().clone() for k, v in action.items()}
+                    flat_action = get_location(detached_action, obs)
                     obs, reward, _ = vec_envs.step(detached_action)
-                    flat_action = torch.concat(list(detached_action.values()), dim=1)
 
                     feat = model.wm_step(flat_action, obs)
                     buffer["feat"].append(feat)
@@ -139,12 +152,12 @@ def main(config):
             buffer["central_obs"] = []
             obs = vec_envs.reset()
             for _ in range(config.eval_obs_length):
-                action, _, _ = model.get_action(feat)
+                action, logprob, actor_ent = model.get_action(feat)
                 detached_action = {k: v.detach().clone() for k, v in action.items()}
-                central_obs = model.wm.scan_central(detached_action.copy(), obs["loc"])
+                flat_action = get_location(detached_action, obs)
+                central_obs = model.wm.scan_central()
 
                 obs, _, _ = vec_envs.step(detached_action)
-                flat_action = torch.concat(list(detached_action.values()), dim=1)
                 feat = model.wm_step(flat_action, obs)
                 buffer["central_obs"].append(central_obs)
                 buffer["obs"].append(obs)
@@ -153,12 +166,10 @@ def main(config):
                 for _ in range(config.eval_img_length):
                     action, _, _ = model.get_action(feat)
                     detached_action = {k: v.detach().clone() for k, v in action.items()}
-                    central_obs = model.wm.scan_central(
-                        detached_action.copy(), obs["loc"]
-                    )
+                    flat_action = get_location(detached_action, obs)
+                    central_obs = model.wm.scan_central()
 
                     obs, _, _ = vec_envs.step(detached_action)
-                    flat_action = torch.concat(list(detached_action.values()), dim=1)
                     feat = model.wm_step(flat_action, obs)
                     buffer["central_obs"].append(central_obs)
                     buffer["obs"].append(obs)

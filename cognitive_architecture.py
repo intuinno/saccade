@@ -405,22 +405,117 @@ class CognitiveArchitecture(nn.Module):
 
     def train_video(self, batch, obs):
         feats = batch["feat"][1:]
-        # feats = torch.stack(feats, dim=1)
-        # feats = einops.rearrange(feats, "B T C -> (B T) C")
 
         with tools.RequiresGrad(self.video_decoder):
             recon = self.video_decoder(feats)
-            recon = einops.rearrange(recon, "T B W H C -> B T W H C")
+            recon = einops.rearrange(
+                recon, "T B W H C -> B T W H C"
+            )  # Shape: [B, T, W, H, C]
+
+            # Ensure 'recon' has 3 channels for RGB
+            if recon.shape[-1] == 1:
+                recon = recon.repeat(
+                    1, 1, 1, 1, 3
+                )  # From [B, T, W, H, 1] to [B, T, W, H, 3]
+
+            # Extract one-hot 'loc' from 'obs' and stack along the time dimension
+            loc_one_hot = [
+                o["loc"] for o in obs
+            ]  # List of [B, 16] tensors over time steps
+            loc_one_hot = torch.stack(loc_one_hot, dim=1)  # Shape: [B, T, 16]
+
+            # Convert one-hot vectors to indices (0 to 15)
+            loc_indices = torch.argmax(loc_one_hot, dim=2)  # Shape: [B, T]
+
+            # Calculate row and column indices in a 4x4 grid
+            row = loc_indices // 4  # Shape: [B, T]
+            col = loc_indices % 4  # Shape: [B, T]
+
+            # Get image dimensions
+            B, T, W, H, C = recon.shape
+            cell_width = W // 4
+            cell_height = H // 4
+
+            # Calculate grid cell positions
+            x_start = (col * cell_width).long()
+            x_end = ((col + 1) * cell_width).long()
+            y_start = (row * cell_height).long()
+            y_end = ((row + 1) * cell_height).long()
+
+            # Initialize boundary masks
+            boundary_masks = torch.zeros(
+                (B, T, W, H, 3), dtype=torch.float32, device=recon.device
+            )
+
+            # Define boundary thickness
+            thickness = 3  # Adjust the thickness as needed
+
+            # Overlay boundaries on the masks
+            for b in range(B):
+                for t in range(T):
+                    xs = x_start[b, t].item()
+                    xe = x_end[b, t].item()
+                    ys = y_start[b, t].item()
+                    ye = y_end[b, t].item()
+
+                    # Draw thick green boundaries (green channel index is 1)
+                    # Top boundary
+                    y_top_start = max(ys - thickness, 0)
+                    boundary_masks[b, t, y_top_start:ys, xs:xe, 1] = 255
+
+                    # Bottom boundary
+                    y_bottom_end = min(ye + thickness, H)
+                    boundary_masks[b, t, ye:y_bottom_end, xs:xe, 1] = 255
+
+                    # Left boundary
+                    x_left_start = max(xs - thickness, 0)
+                    boundary_masks[b, t, ys:ye, x_left_start:xs, 1] = 255
+
+                    # Right boundary
+                    x_right_end = min(xe + thickness, W)
+                    boundary_masks[b, t, ys:ye, xe:x_right_end, 1] = 255
+
+            # Overlay the boundary masks on the reconstructed images
+            recon_with_boundary = recon.clone()
+            mask_positions = boundary_masks.sum(-1) > 0  # Sum over the color channels
+            recon_with_boundary[mask_positions] = boundary_masks[mask_positions]
+
             gt = [o["GT"] for o in obs]
             gt = torch.stack(gt, dim=1)
             gt = einops.rearrange(gt, "B T W H -> B T W H 1")
+
+            # Ensure 'gt' has 3 channels for visualization
+            gt = gt.repeat(1, 1, 1, 1, 3)
+
             loss = self.video_loss(recon, gt)
             grad = self.optimizer(loss, self.video_decoder.parameters())
+
         diff = (gt - recon + 128) / 256
-        video = torch.cat([gt, recon, diff], 2)
+
+        # Use 'recon_with_boundary' for visualization
+        video = torch.cat([gt, recon_with_boundary, diff], dim=2)
         video = video[:6]
-        video = einops.repeat(video, "B T H W 1 -> B T H W 3")
+        # 'video' already has 3 channels, so no need to repeat
         return to_np(loss), to_np(video)
+
+    # def train_video(self, batch, obs):
+    #     feats = batch["feat"][1:]
+    #     # feats = torch.stack(feats, dim=1)
+    #     # feats = einops.rearrange(feats, "B T C -> (B T) C")
+
+    #     with tools.RequiresGrad(self.video_decoder):
+    #         recon = self.video_decoder(feats)
+    #         recon = einops.rearrange(recon, "T B W H C -> B T W H C")
+    #         gt = [o["GT"] for o in obs]
+    #         gt = torch.stack(gt, dim=1)
+    #         gt = einops.rearrange(gt, "B T W H -> B T W H 1")
+    #         loss = self.video_loss(recon, gt)
+    #         grad = self.optimizer(loss, self.video_decoder.parameters())
+    #     diff = (gt - recon + 128) / 256
+    #     video = torch.cat([gt, recon, diff], 2)
+    #     video = video[:6]
+    #     video = einops.repeat(video, "B T H W 1 -> B T H W 3")
+    #     return to_np(loss), to_np(video)
 
     def decode_one_video(self, recon, buffer, target_feeder, target_obs, width):
         # Peripheral vision video

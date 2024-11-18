@@ -126,8 +126,8 @@ defaults:
   # L2HWM
   tmp_abs_factor: 1
 
-sac-014-rev2:
-  exp_name: "sac-014-rev2"
+sac-014-rev3:
+  exp_name: "sac-014-rev3"
   intrinsic_reward: "prediction_error"
   behavior: "vanilla_AC"
   dyn_hidden: 32

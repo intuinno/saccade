@@ -11,7 +11,7 @@ import tools
 from cognitive_architecture import CognitiveArchitecture
 from datetime import datetime
 import pytz
-from envs.moving_mnist_env import MovingMNISTEnv
+from envs.vec_sac_env import VecSaccadeEnv
 
 
 def append_buffer(buffer, item):
@@ -68,7 +68,7 @@ def main(config):
     logdir.mkdir(parents=True, exist_ok=False)
 
     print("Create envs.")
-    vec_envs = MovingMNISTEnv(batch_size=config.batch_size, device=config.device)
+    vec_envs = VecSaccadeEnv(batch_size=config.batch_size, device=config.device)
     print("Action space", config.action_space)
     config.num_actions = sum(k for k in config.action_space.values())
 
@@ -112,7 +112,7 @@ def main(config):
                     action, logprob, actor_ent = model.get_action(feat)
                     detached_action = {k: v.detach().clone() for k, v in action.items()}
                     flat_action = get_location(detached_action, obs)
-                    obs, reward, _ = vec_envs.step(detached_action)
+                    obs, reward, _ = vec_envs.step(flat_action)
 
                     feat = model.wm_step(flat_action, obs)
                     buffer["feat"].append(feat)
@@ -157,7 +157,7 @@ def main(config):
                 flat_action = get_location(detached_action, obs)
                 central_obs = model.wm.scan_central()
 
-                obs, _, _ = vec_envs.step(detached_action)
+                obs, _, _ = vec_envs.step(flat_action)
                 feat = model.wm_step(flat_action, obs)
                 buffer["central_obs"].append(central_obs)
                 buffer["obs"].append(obs)
@@ -169,7 +169,7 @@ def main(config):
                     flat_action = get_location(detached_action, obs)
                     central_obs = model.wm.scan_central()
 
-                    obs, _, _ = vec_envs.step(detached_action)
+                    obs, _, _ = vec_envs.step(flat_action)
                     feat = model.wm_step(flat_action, obs)
                     buffer["central_obs"].append(central_obs)
                     buffer["obs"].append(obs)

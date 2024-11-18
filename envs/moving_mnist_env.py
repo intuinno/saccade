@@ -66,7 +66,7 @@ class MovingMNISTEnv(BaseEnv):
         self.mnist = torchvision.datasets.MNIST(
             root="./data", train=True, download=True, transform=transforms.ToTensor()
         )
-        self.data = self.mnist.data.float() / 255.0  # Normalize to [0, 1]
+        self.data = self.mnist.data.float()
         self.targets = self.mnist.targets  # Labels
 
         # Preload digits and labels to GPU
@@ -312,7 +312,7 @@ class MovingMNISTEnv(BaseEnv):
         )
 
         # Clip pixel values to [0, 1]
-        frames = torch.clamp(frames, 0, 1)
+        frames = torch.clamp(frames, 0, 255)
 
         # Update frames in self.frames
         self.frames = frames

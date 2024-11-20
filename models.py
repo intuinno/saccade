@@ -662,16 +662,16 @@ class ACBehavior(nn.Module):
 
 
 class SaccadeRandomBehavior(nn.Module):
-    def __init__(self, config, act_space):
+    def __init__(self, config):
         super(SaccadeRandomBehavior, self).__init__()
         self._config = config
-        self._act_space = act_space
+        self._act_space = config.act_space
 
     def actor(self, feat):
         if self._config.actor["dist"] == "onehot":
             return tools.OneHotDist(
                 torch.zeros(self._config.num_actions)
-                .repeat(self._config.envs, 1)
+                .repeat(self._config.batch_size, 1)
                 .to(self._config.device)
             )
         else:
@@ -681,7 +681,7 @@ class SaccadeRandomBehavior(nn.Module):
                     .repeat(self._config.envs, 1)
                     .to(self._config.device),
                     torch.Tensor(self._act_space.high)
-                    .repeat(self._config.envs, 1)
+                    .repeat(self._config.batch_size, 1)
                     .to(self._config.device),
                 ),
                 1,

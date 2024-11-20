@@ -250,39 +250,13 @@ class LocalModule(nn.Module):
         return recon
 
 
-class HierarchicalWorldModel(nn.Module):
-
+class BaseWorldModel(nn.Module):
     def __init__(self, configs):
-        super(HierarchicalWorldModel, self).__init__()
-        modules = {}
+        super(BaseWorldModel, self).__init__()
         self.configs = configs
         self._use_amp = True if configs.precision == 16 else False
         self.feeder_keys = configs.feeder_keys
-
-        # Build feeders
         self.feeders = {}
-        for key, size in self.feeder_keys.items():
-            self.feeders[key] = Feeder(key, size)
-            name = f"{key}_module"
-            localModule = LocalModule(
-                name, lowers=[self.feeders[key]], configs=configs, is_leaf=True
-            )
-            modules[name] = localModule
-
-        modules["assoc_module"] = LocalModule(
-            "assoc_module",
-            lowers=[modules["central_module"], modules["loc_module"]],
-            configs=configs,
-        )
-
-        modules["top_module"] = LocalModule(
-            "top_module",
-            lowers=[modules["peripheral_module"], modules["assoc_module"]],
-            context_size=configs.num_actions,
-            configs=configs,
-        )
-        self.local_modules = nn.ModuleDict(modules)
-        print(self.local_modules.keys())
 
     def get_init_state(self):
         return self.local_modules["top_module"].init_layer()
@@ -306,25 +280,6 @@ class HierarchicalWorldModel(nn.Module):
         feat = m[module_name].dynamics.get_feat(prior)
         return feat
 
-    def scan_central(self):
-        patches = []
-        for a in range(self.configs.num_actions):
-            a = torch.LongTensor([a]).to(self.configs.device)
-            action = torch.nn.functional.one_hot(
-                a, num_classes=self.configs.num_actions
-            )
-            action = einops.repeat(action, "1 c -> b c", b=self.configs.batch_size)
-            top_feat = self.get_feat_from_module("top_module", action)
-            assoc_feat = self.get_feat_from_module("assoc_module", top_feat)
-            central_feat = self.get_feat_from_module("central_module", assoc_feat)
-            patch = self.local_modules["central_module"].decoder(central_feat)
-            patches.append(patch["central-feeder"].mode().detach())
-        recon = torch.stack(patches, dim=1)
-        image = einops.rearrange(
-            recon, "b (w1 h1) (w2 h2) -> b (w1 w2) (h1 h2)", w1=4, w2=16
-        )
-        return image
-
     def set_imagine_mode(self, mode):
         for name, module in self.local_modules.items():
             module.is_imaginary = mode
@@ -344,12 +299,111 @@ class HierarchicalWorldModel(nn.Module):
         return self.local_modules["top_module"].prev_state
 
 
+class HierarchicalWorldModel(BaseWorldModel):
+
+    def __init__(self, configs):
+        super(HierarchicalWorldModel, self).__init__(configs)
+
+        # Build feeders
+        modules = {}
+        for key, size in self.feeder_keys.items():
+            self.feeders[key] = Feeder(key, size)
+            name = f"{key}_module"
+            localModule = LocalModule(
+                name, lowers=[self.feeders[key]], configs=configs, is_leaf=True
+            )
+            modules[name] = localModule
+
+        modules["assoc_module"] = LocalModule(
+            "assoc_module",
+            lowers=[modules["central_module"], modules["loc_module"]],
+            configs=configs,
+        )
+
+        modules["top_module"] = LocalModule(
+            "top_module",
+            lowers=[modules["peripheral_module"], modules["assoc_module"]],
+            context_size=configs.num_actions,
+            configs=configs,
+        )
+        self.local_modules = nn.ModuleDict(modules)
+        print(self.local_modules.keys())
+
+    def scan_central(self):
+        patches = []
+        for a in range(self.configs.num_actions):
+            a = torch.LongTensor([a]).to(self.configs.device)
+            action = torch.nn.functional.one_hot(
+                a, num_classes=self.configs.num_actions
+            )
+            action = einops.repeat(action, "1 c -> b c", b=self.configs.batch_size)
+            top_feat = self.get_feat_from_module("top_module", action)
+            assoc_feat = self.get_feat_from_module("assoc_module", top_feat)
+            central_feat = self.get_feat_from_module("central_module", assoc_feat)
+            patch = self.local_modules["central_module"].decoder(central_feat)
+            patches.append(patch["central-feeder"].mode().detach())
+        recon = torch.stack(patches, dim=1)
+        image = einops.rearrange(
+            recon, "b (w1 h1) (w2 h2) -> b (w1 w2) (h1 h2)", w1=4, w2=16
+        )
+        return image
+
+
+class FlatWorldModel(BaseWorldModel):
+
+    def __init__(self, configs):
+        super(FlatWorldModel, self).__init__(configs)
+
+        modules = {}
+        del self.feeder_keys["loc"]
+        for key, size in self.feeder_keys.items():
+
+            self.feeders[key] = Feeder(key, size)
+        modules["top_module"] = LocalModule(
+            "top_module",
+            lowers=[self.feeders["central"], self.feeders["peripheral"]],
+            context_size=configs.num_actions,
+            configs=configs,
+        )
+        self.local_modules = nn.ModuleDict(modules)
+        print(self.local_modules.keys())
+
+    def scan_central(self):
+        patches = []
+        for a in range(self.configs.num_actions):
+            a = torch.LongTensor([a]).to(self.configs.device)
+            action = torch.nn.functional.one_hot(
+                a, num_classes=self.configs.num_actions
+            )
+            action = einops.repeat(action, "1 c -> b c", b=self.configs.batch_size)
+            top_feat = self.get_feat_from_module("top_module", action)
+            patch = self.local_modules["top_module"].decoder(top_feat)
+            patches.append(patch["central-feeder"].mode().detach())
+        recon = torch.stack(patches, dim=1)
+        image = einops.rearrange(
+            recon, "b (w1 h1) (w2 h2) -> b (w1 w2) (h1 h2)", w1=4, w2=16
+        )
+        return image
+
+
 class CognitiveArchitecture(nn.Module):
     def __init__(self, configs):
         super(CognitiveArchitecture, self).__init__()
         self.configs = configs
-        self.wm = HierarchicalWorldModel(configs)
-        self.behavior = models.ACBehavior(configs)
+        if configs.world_model == "hierarchical":
+            self.wm = HierarchicalWorldModel(configs)
+        elif configs.world_model == "flat":
+            self.wm = FlatWorldModel(configs)
+        else:
+            raise NotImplementedError
+        if configs.behavior == "vanilla_AC":
+            self.behavior = models.ACBehavior(configs)
+        elif configs.behavior == "random":
+            self.behavior = models.SaccadeRandomBehavior(configs)
+        elif configs.behavior == "imagine_AC":
+            self.behavior = models.ImagBehavior(configs)
+        else:
+            raise NotImplementedError
         if configs.dyn_discrete:
             feat_size = configs.dyn_stoch * configs.dyn_discrete + configs.dyn_deter
         else:

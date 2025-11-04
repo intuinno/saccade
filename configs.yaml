@@ -176,9 +176,21 @@ memorymaze:
   imag_gradient: 'reinforce'
   task: 'memorymaze_9x9'
 
+vertebrate:
+  task: vertebrate_walk
+  steps: 1e8
+  parallel: False
+  # envs: 1
+  encdoer: {mlp_keys: '.*', cnn_keys: 'image'}
+  decoder: {mlp_keys: '.*', cnn_keys: 'image'}
+  actor: {dist: 'onehot', std: 'none'}
+  imag_gradient: 'reinforce'
+
+
 debug:
   debug: True
   pretrain: 1
   prefill: 1
   batch_size: 10
   batch_length: 20
+

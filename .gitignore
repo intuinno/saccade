@@ -1,4 +1,5 @@
 #
+logs/
 run*
 logdir*
 vis_*

@@ -193,6 +193,10 @@ def make_env(config, mode, id):
 
         env = minecraft.make_env(task, size=config.size, break_speed=config.break_speed)
         env = wrappers.OneHotAction(env)
+    elif suite == "vertebrate":
+        import envs.vertebrate_env as vertebrate_env
+        env = vertebrate_env.VertebrateEnv()
+        env = wrappers.OneHotAction(env)
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)

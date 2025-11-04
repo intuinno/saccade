@@ -1,5 +1,12 @@
 #
 logs/
+.DS_Store
+data/
+videos/
+
+datasets/
+models/
+
 run*
 logdir*
 vis_*

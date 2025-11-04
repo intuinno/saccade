@@ -6,47 +6,59 @@ import vertebrate_env
 import einops
 import numpy as np
 import os
-import gym 
-
-
+import gym
 
 
 def stack_camera_obs(obs):
-    camera = obs['egocentric_camera']
+    camera = obs["egocentric_camera"]
     camera = einops.rearrange(camera, "(k1  k2) h w c -> (k1 h) (k2 w) c", k1=4)
-    obs['egocentric_camera'] = camera
+    obs["egocentric_camera"] = camera
     return obs
-    
+
+
 def last_camera_obs(obs):
-    camera = obs['egocentric_camera']
+    camera = obs["egocentric_camera"]
     camera = camera[-1]
-    obs['image'] = camera
-    del obs['egocentric_camera']
+    obs["image"] = camera
+    del obs["egocentric_camera"]
     return obs
-    
+
 
 class VertebrateEnv:
-    def __init__(self, obs_key='egocentric_image', act_key='action', seed=0,  stack_camera=True,):
-        self._env = gymnasium.make("vertebrate_env/VertebrateEnv-v0", render_mode="rgb_array", temp_k=16, seed=seed)
+    def __init__(
+        self,
+        obs_key="egocentric_image",
+        act_key="action",
+        seed=0,
+        stack_camera=True,
+        render_mode="rgb_array",
+        temp_k=16,
+    ):
+        self._env = gymnasium.make(
+            "vertebrate_env/VertebrateEnv-v0",
+            render_mode=render_mode,
+            temp_k=temp_k,
+        )
+        self._seed = seed
         if stack_camera:
             original_obs_space = self._env.observation_space
-            K, W, H, C = original_obs_space['egocentric_camera'].shape
+            K, W, H, C = original_obs_space["egocentric_camera"].shape
             new_space = spaces.Box(0, 255, shape=(W, H, C), dtype=np.uint8)
-            
+
             # Create new observation space without 'egocentric_camera' and with 'image'
             new_obs_spaces = {}
             for key, space in original_obs_space.spaces.items():
-                if key != 'egocentric_camera':  # Exclude this key
+                if key != "egocentric_camera":  # Exclude this key
                     new_obs_spaces[key] = space
-            new_obs_spaces['image'] = new_space  # Add the new 'image' space
-            
+            new_obs_spaces["image"] = new_space  # Add the new 'image' space
+
             # Create new Dict space
             new_obs_space = spaces.Dict(new_obs_spaces)
             self._env = TransformObservation(self._env, last_camera_obs, new_obs_space)
-        self._obs_is_dict = hasattr(self._env.observation_space, 'spaces')
+        self._obs_is_dict = hasattr(self._env.observation_space, "spaces")
         self._obs_key = obs_key
         self._act_key = act_key
-        
+
     def __getattr__(self, name):
         if name.startswith("__"):
             raise AttributeError(name)
@@ -59,10 +71,7 @@ class VertebrateEnv:
         """Convert gymnasium space to gym space"""
         if isinstance(space, gymnasium.spaces.Box):
             return gym.spaces.Box(
-                low=space.low, 
-                high=space.high, 
-                shape=space.shape, 
-                dtype=space.dtype
+                low=space.low, high=space.high, shape=space.shape, dtype=space.dtype
             )
         elif isinstance(space, gymnasium.spaces.Discrete):
             return gym.spaces.Discrete(space.n)
@@ -81,7 +90,9 @@ class VertebrateEnv:
                 converted_spaces.append(self._convert_gymnasium_space_to_gym(subspace))
             return gym.spaces.Tuple(converted_spaces)
         else:
-            raise NotImplementedError(f"Space conversion not implemented for {type(space)}")
+            raise NotImplementedError(
+                f"Space conversion not implemented for {type(space)}"
+            )
 
     @property
     def observation_space(self):
@@ -92,8 +103,12 @@ class VertebrateEnv:
                 converted_spaces[key] = self._convert_gymnasium_space_to_gym(space)
             spaces = converted_spaces
         else:
-            spaces = {self._obs_key: self._convert_gymnasium_space_to_gym(self._env.observation_space)}
-        
+            spaces = {
+                self._obs_key: self._convert_gymnasium_space_to_gym(
+                    self._env.observation_space
+                )
+            }
+
         return gym.spaces.Dict(
             {
                 **spaces,
@@ -106,11 +121,13 @@ class VertebrateEnv:
     @property
     def action_space(self):
         gymnasium_space = self._env.action_space
-        if hasattr(gymnasium_space, 'n'):  # Discrete space
+        if hasattr(gymnasium_space, "n"):  # Discrete space
             return gym.spaces.Discrete(gymnasium_space.n)
         else:
             # For other space types, you might need additional conversion logic
-            raise NotImplementedError(f"Action space conversion not implemented for {type(gymnasium_space)}")
+            raise NotImplementedError(
+                f"Action space conversion not implemented for {type(gymnasium_space)}"
+            )
 
     @property
     def act_space(self):
@@ -142,10 +159,18 @@ class VertebrateEnv:
         return obs, reward, done, info
 
     def reset(self):
-        obs, info = self._env.reset()
+        obs, info = self._env.reset(seed=self._seed)
         if not self._obs_is_dict:
             obs = {self._obs_key: obs}
         obs["is_first"] = True
         obs["is_last"] = False
         obs["is_terminal"] = False
         return obs
+
+    def render(self, mode="human", **kwargs):
+        """Render the environment"""
+        return self._env.render()
+
+    def close(self):
+        """Close the environment"""
+        self._env.close()

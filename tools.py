@@ -136,6 +136,7 @@ def simulate(
     steps=0,
     episodes=0,
     state=None,
+    intrinsic_reward=None,
 ):
     # initialize or unpack simulation state
     if state is None:
@@ -151,8 +152,24 @@ def simulate(
         # reset envs if necessary
         if done.any():
             indices = [index for index, d in enumerate(done) if d]
-            results = [envs[i].reset() for i in indices]
-            results = [r() for r in results]
+            # Optimized parallel reset for ParallelEnvWrapper
+            if (hasattr(envs[0], 'driver') and hasattr(envs[0].driver, 'parallel') 
+                and envs[0].driver.parallel and len(indices) > 1):
+                # Send all reset commands first, then collect all results
+                driver = envs[0].driver
+                for i in indices:
+                    driver.pipes[envs[i].env_id].send(('reset',))
+                # Collect all results in parallel
+                results = []
+                for i in indices:
+                    status, result = driver.pipes[envs[i].env_id].recv()
+                    if status == 'error':
+                        raise RuntimeError(f"Reset error in env {envs[i].env_id}: {result}")
+                    results.append(result)
+            else:
+                # Original sequential approach for backward compatibility
+                results = [envs[i].reset() for i in indices]
+                results = [r() for r in results]
             for index, result in zip(indices, results):
                 t = result.copy()
                 t = {k: convert(v) for k, v in t.items()}
@@ -174,9 +191,27 @@ def simulate(
         else:
             action = np.asarray(action)
         assert len(action) == len(envs)
-        # step envs
-        results = [e.step(a) for e, a in zip(envs, action)]
-        results = [r() for r in results]
+        
+        # step envs - optimized parallel execution for ParallelEnvWrapper
+        if (hasattr(envs[0], 'driver') and hasattr(envs[0].driver, 'parallel') 
+            and envs[0].driver.parallel and len(envs) > 1):
+            # Optimized: send all commands first, then collect all results
+            driver = envs[0].driver
+            # Send all step commands in parallel
+            for env, act in zip(envs, action):
+                driver.pipes[env.env_id].send(('step', act))
+            # Collect all results in parallel 
+            results = []
+            for env in envs:
+                status, result = driver.pipes[env.env_id].recv()
+                if status == 'error':
+                    raise RuntimeError(f"Step error in env {env.env_id}: {result}")
+                results.append(result)
+        else:
+            # Original sequential approach for backward compatibility
+            results = [e.step(a) for e, a in zip(envs, action)]
+            results = [r() for r in results]
+        
         obs, reward, done = zip(*[p[:3] for p in results])
         obs = list(obs)
         reward = list(reward)
@@ -185,8 +220,20 @@ def simulate(
         length += 1
         step += len(envs)
         length *= 1 - done
+        
+        if intrinsic_reward == "prediction_error":
+            obs_copy = obs.copy()
+            obs_copy = {
+                k: np.stack([o[k] for o in obs_copy])
+                for k in obs_copy[0]
+                if "log_" not in k
+            }
+            i_reward = agent.intrinsic_reward(obs_copy, agent_state)
+        else:
+            i_reward = [0] * len(envs)
+
         # add to cache
-        for a, result, env in zip(action, results, envs):
+        for a, result, env, ir in zip(action, results, envs, i_reward):
             o, r, d, info = result
             o = {k: convert(v) for k, v in o.items()}
             transition = o.copy()
@@ -196,6 +243,8 @@ def simulate(
                 transition["action"] = a
             transition["reward"] = r
             transition["discount"] = info.get("discount", np.asarray(1 - float(d)))
+            if intrinsic_reward == "prediction_error":
+                transition["reward"] += ir
             add_to_cache(cache, env.id, transition)
 
         if done.any():
@@ -204,13 +253,13 @@ def simulate(
             for i in indices:
                 save_episodes(directory, {envs[i].id: cache[envs[i].id]})
                 length = len(cache[envs[i].id]["reward"]) - 1
-                score = float(np.array(cache[envs[i].id]["reward"]).sum())
+                score = float(np.asarray(cache[envs[i].id]["reward"]).sum())
                 video = cache[envs[i].id]["image"]
                 # record logs given from environments
                 for key in list(cache[envs[i].id].keys()):
                     if "log_" in key:
                         logger.scalar(
-                            key, float(np.array(cache[envs[i].id][key]).sum())
+                            key, float(np.asarray(cache[envs[i].id][key]).sum())
                         )
                         # log items won't be used later
                         cache[envs[i].id].pop(key)
@@ -247,6 +296,27 @@ def simulate(
             # FIFO
             cache.popitem(last=False)
     return (step - steps, episode - episodes, done, length, obs, agent_state, reward)
+
+
+def _parallel_reset_envs(envs, indices):
+    """Optimized parallel reset for ParallelEnvWrapper environments"""
+    # Send all reset commands in parallel
+    driver = envs[0].driver
+    for i in indices:
+        driver.pipes[envs[i].env_id].send(('reset',))
+    
+    # Collect all results in parallel
+    results = []
+    for i in indices:
+        status, result = driver.pipes[envs[i].env_id].recv()
+        if status == 'error':
+            raise RuntimeError(f"Reset error in env {envs[i].env_id}: {result}")
+        results.append(result)
+    
+    return results
+
+
+# Removed duplicate simulate function - using the correct one starting at line 128
 
 
 def add_to_cache(cache, id, transition):

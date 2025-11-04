@@ -108,10 +108,16 @@ class SelectAction(gym.Wrapper):
 class UUID(gym.Wrapper):
     def __init__(self, env):
         super().__init__(env)
-        timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
-        self.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
+        # Preserve existing integer IDs from parallel processing, otherwise create UUID
+        if hasattr(env, 'id') and isinstance(env.id, int):
+            self.id = env.id  # Keep integer ID for consistent cache sorting
+        else:
+            timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+            self.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
 
     def reset(self):
-        timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
-        self.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
+        # Only regenerate UUID if we're using string UUIDs, preserve integer IDs
+        if isinstance(self.id, str):
+            timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+            self.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
         return self.env.reset()

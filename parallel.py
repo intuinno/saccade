@@ -65,7 +65,7 @@ class ParallelDriver:
         """Create serial environments for non-parallel execution"""
         self.envs = [fn() for fn in make_env_fns]
         for i, env in enumerate(self.envs):
-            env.id = i
+            env.id = int(i)  # Ensure ID is always an integer
     
     @staticmethod
     def _env_worker(worker_id, pipe, serialized_fn):
@@ -81,9 +81,9 @@ class ParallelDriver:
             
             # Deserialize and create environment
             env_fn = cloudpickle.loads(serialized_fn)
+            print(f"Worker {worker_id}: Environment function deserialized, creating environment...")
             env = env_fn()
-            
-            print(f"Worker {worker_id}: Environment created, entering command loop")
+            print(f"Worker {worker_id}: Environment created successfully, entering command loop")
             
             while True:
                 try:
@@ -135,6 +135,9 @@ class ParallelDriver:
                     
         except Exception as e:
             print(f"Worker {worker_id}: Initialization error: {e}")
+            import traceback
+            print(f"Worker {worker_id}: Full error traceback:")
+            traceback.print_exc()
         finally:
             try:
                 if env and hasattr(env, 'close'):
@@ -195,9 +198,9 @@ class ParallelEnvWrapper:
     """
     
     def __init__(self, env_id, driver):
-        self.env_id = env_id
+        self.env_id = int(env_id)
         self.driver = driver
-        self.id = env_id
+        self.id = int(env_id)  # Ensure ID is always an integer
         
         # Try to get environment attributes from the worker process
         if driver.parallel:

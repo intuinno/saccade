@@ -363,7 +363,14 @@ def add_to_cache(cache, id, transition):
 
 def erase_over_episodes(cache, dataset_size):
     step_in_dataset = 0
-    for key, ep in reversed(sorted(cache.items(), key=lambda x: x[0])):
+    # Handle mixed key types by converting all to strings for consistent sorting
+    try:
+        sorted_items = reversed(sorted(cache.items(), key=lambda x: x[0]))
+    except TypeError:
+        # Fallback: sort by string representation of keys to handle mixed types
+        sorted_items = reversed(sorted(cache.items(), key=lambda x: str(x[0])))
+    
+    for key, ep in sorted_items:
         if (
             not dataset_size
             or step_in_dataset + (len(ep["reward"]) - 1) <= dataset_size

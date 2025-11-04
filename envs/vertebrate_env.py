@@ -65,7 +65,7 @@ class VertebrateEnv:
         try:
             return getattr(self._env, name)
         except AttributeError:
-            raise ValueError(name)
+            raise AttributeError(name)  # Should raise AttributeError, not ValueError
 
     def _convert_gymnasium_space_to_gym(self, space):
         """Convert gymnasium space to gym space"""

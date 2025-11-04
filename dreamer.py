@@ -38,8 +38,33 @@ def create_parallel_envs(config, mode_prefix):
     Create environment list using our custom parallel processing.
     Returns environments compatible with tools.simulate.
     """
-    # Create environment constructor functions
-    make_env_fns = [lambda i=i: make_env(config, mode_prefix, i) for i in range(config.envs)]
+    # Create serializable environment constructor functions
+    # We need to pass only serializable data, not the full config object
+    import copy
+    
+    def create_env_constructor(env_id):
+        """Create a serializable environment constructor"""
+        # Extract only the serializable parts of config we need
+        config_dict = {
+            'task': config.task,
+            'action_repeat': config.action_repeat, 
+            'size': config.size,
+            'seed': config.seed,
+            'time_limit': config.time_limit,
+            'grayscale': config.grayscale
+        }
+        
+        def env_constructor():
+            # Reconstruct a minimal config object
+            import argparse
+            minimal_config = argparse.Namespace(**config_dict)
+            # Don't use UUID wrapper in parallel mode - ParallelEnvWrapper handles IDs
+            return make_env(minimal_config, mode_prefix, env_id, use_uuid=False)
+        
+        return env_constructor
+    
+    # Create environment constructors
+    make_env_fns = [create_env_constructor(i) for i in range(config.envs)]
     
     # Use our custom parallel driver
     envs, driver = parallel.create_parallel_envs(make_env_fns, parallel=config.parallel)
@@ -166,7 +191,7 @@ def make_dataset(episodes, config):
     return dataset
 
 
-def make_env(config, mode, id):
+def make_env(config, mode, id, use_uuid=True):
     suite, task = config.task.split("_", 1)
     if suite == "dmc":
         try:
@@ -238,7 +263,9 @@ def make_env(config, mode, id):
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)
     env = wrappers.SelectAction(env, key="action")
-    env = wrappers.UUID(env)
+    # Only apply UUID wrapper if not using parallel processing (parallel handles IDs)
+    if use_uuid:
+        env = wrappers.UUID(env)
     if suite == "minecraft":
         env = wrappers.RewardObs(env)
     return env
@@ -348,74 +375,63 @@ def main(config):
                 episodes=config.eval_episode_num,
             )
             if config.video_pred_log:
-                video_pred = agent._wm.video_pred(next(eval_dataset))
-                logger.video("eval_openl", to_np(video_pred))
+                try:
+                    eval_batch = next(eval_dataset)
+                    print(f"🎬 Generating eval video prediction with batch shape: {eval_batch['image'].shape}")
+                    video_pred = agent._wm.video_pred(eval_batch)
+                    print(f"✅ Generated eval openl shape: {video_pred.shape}")
+                    logger.video("eval_openl", to_np(video_pred))
+                except Exception as e:
+                    print(f"❌ Error generating eval openl: {e}")
+                    import traceback
+                    traceback.print_exc()
         print("Start training.")
         
-        # Training step counter to accumulate training debt
-        training_debt = 0
-        
-        def fast_policy(obs, reset, state=None):
-            """Fast policy that generates actions without training bottleneck"""
-            nonlocal training_debt
+        # Monitor WM training with debugging wrapper
+        def debug_agent_wrapper(obs, reset, state=None, training=True):
+            """Wrapper to debug WM training issues"""
+            old_update_count = agent._update_count
+            old_metrics_keys = set(agent._metrics.keys()) if agent._metrics else set()
             
-            # Accumulate training debt instead of blocking action generation
-            step = agent._step
-            if agent._should_pretrain():
-                training_debt += config.pretrain
-            else:
-                training_debt += agent._should_train(step)
+            result = agent.__call__(obs, reset, state, training)
             
-            # Generate actions fast (no training)
-            policy_output, new_state = agent._policy(obs, state, training=True)
-            
-            # Update step counter
-            agent._step += len(reset)
-            logger.step = config.action_repeat * agent._step
-            
-            return policy_output, new_state
-        
-        # Custom simulate loop with decoupled training
-        import time
-        steps_completed = 0
-        target_steps = config.eval_every
-        
-        while steps_completed < target_steps:
-            # Run a batch of environment steps (fast)
-            batch_steps = min(32, target_steps - steps_completed)  # Process in batches
-            
-            temp_state = tools.simulate(
-                fast_policy,
-                train_envs,
-                train_eps,
-                config.traindir,
-                logger,
-                limit=config.dataset_size,
-                steps=batch_steps,
-                state=state if steps_completed == 0 else temp_state,
-            )
-            
-            # Pay back training debt in batch (without blocking environments)
-            if training_debt > 0:
-                print(f"🔥 Paying training debt: {training_debt} steps")
-                for _ in range(min(training_debt, 50)):  # Cap training steps per batch
-                    agent._train(next(train_dataset))
-                    agent._update_count += 1
-                    agent._metrics["update_count"] = agent._update_count
-                training_debt = max(0, training_debt - 50)
+            # Check if training actually happened
+            if agent._update_count > old_update_count:
+                new_metrics = set(agent._metrics.keys()) - old_metrics_keys
+                print(f"✅ Training step {agent._update_count}: New metrics {new_metrics}")
                 
-                # Log if needed
-                if agent._should_log(agent._step):
-                    for name, values in agent._metrics.items():
-                        logger.scalar(name, float(np.mean(values)))
-                        agent._metrics[name] = []
-                    if config.video_pred_log:
-                        openl = agent._wm.video_pred(next(train_dataset))
-                        logger.video("train_openl", to_np(openl))
-                    logger.write(fps=True)
+                # Check WM metrics specifically
+                wm_metrics = [k for k in agent._metrics.keys() if 'loss' in k or 'kl' in k]
+                if wm_metrics:
+                    print(f"🧠 WM metrics: {wm_metrics}")
             
-            steps_completed += batch_steps
-            state = temp_state
+            return result
+        
+        # Use more conservative training reduction to ensure WM learns
+        original_should_train = agent._should_train
+        batch_steps = config.batch_size * config.batch_length
+        reduced_ratio = config.train_ratio / 2  # Reduce by 2x instead of 8x for more WM training
+        
+        # Replace the training scheduler with a less frequent one
+        agent._should_train = tools.Every(batch_steps / reduced_ratio)
+        
+        print(f"🎯 Moderately reduced training ratio from {config.train_ratio} to {reduced_ratio}")
+        print(f"� Training frequency: {reduced_ratio / batch_steps:.4f} (every {batch_steps / reduced_ratio:.1f} env steps)")
+        print(f"🧠 This should still allow proper WM training while improving parallelism")
+        
+        state = tools.simulate(
+            debug_agent_wrapper,
+            train_envs,
+            train_eps,
+            config.traindir,
+            logger,
+            limit=config.dataset_size,
+            steps=config.eval_every,
+            state=state,
+        )
+        
+        # Restore original training schedule for next iteration if needed
+        agent._should_train = original_should_train
         items_to_save = {
             "agent_state_dict": agent.state_dict(),
             "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),

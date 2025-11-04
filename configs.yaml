@@ -181,6 +181,8 @@ vertebrate:
   steps: 1e8
   parallel: True
   envs: 32
+  batch_length: 512
+  train_ratio: 256  # Reduced from 512 to let environments utilize more CPU
   encdoer: {mlp_keys: '.*', cnn_keys: 'image'}
   decoder: {mlp_keys: '.*', cnn_keys: 'image'}
   actor: {dist: 'onehot', std: 'none'}

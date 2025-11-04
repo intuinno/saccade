@@ -26,7 +26,6 @@ sys.path.append(str(pathlib.Path(__file__).parent / "dreamerv3"))
 import models
 import tools
 import envs.wrappers as wrappers
-from dreamer import Agent, make_env
 
 
 def load_config(configs):
@@ -47,14 +46,93 @@ def load_config(configs):
     return config
 
 
+def make_env(config, mode, id):
+    """Create environment directly (simplified version from dreamer.py)"""
+    suite, task = config.task.split("_", 1)
+    if suite == "dmc":
+        import envs.dmc as dmc
+        env = dmc.DeepMindControl(
+            task, config.action_repeat, config.size, seed=config.seed + id
+        )
+        env = wrappers.NormalizeActions(env)
+    elif suite == "atari":
+        import envs.atari as atari
+        env = atari.Atari(
+            task,
+            config.action_repeat,
+            config.size,
+            grayscale=config.grayscale,
+            life_done=True,
+            sticky=config.stickey,
+            seed=config.seed + id,
+        )
+        env = wrappers.OneHotAction(env)
+    elif suite == "crafter":
+        import envs.crafter as crafter
+        env = crafter.Crafter(config.size, seed=config.seed + id)
+        env = wrappers.OneHotAction(env)
+    elif suite == "vertebrate":
+        import envs.vertebrate_env as vertebrate_env
+        env = vertebrate_env.VertebrateEnv(seed=config.seed + id)
+        env = wrappers.OneHotAction(env)
+    else:
+        raise NotImplementedError(suite)
+    
+    env = wrappers.TimeLimit(env, config.time_limit)
+    return env
+
+
+class SimpleAgent:
+    """Simplified agent class for inference only"""
+    def __init__(self, obs_space, act_space, config):
+        self._step = 0
+        self._wm = models.WorldModel(obs_space, act_space, self._step, config)
+        self._task_behavior = models.ImagBehavior(config, self._wm)
+        self.training = False
+    
+    def __call__(self, obs, training=False):
+        obs = {k: torch.tensor(v).unsqueeze(0) if not torch.is_tensor(v) else v.unsqueeze(0) 
+               for k, v in obs.items() if 'log_' not in k}
+        
+        with torch.no_grad():
+            embed = self._wm.encoder(obs)
+            latent, _ = self._wm.rssm.observe(embed, None, None)
+            feat = self._wm.rssm.get_feat(latent)
+            action = self._task_behavior.actor(feat).sample()
+            
+            # Convert to numpy and remove batch dimension
+            action = {k: v.squeeze(0).cpu().numpy() for k, v in action.items()}
+            
+        return action
+    
+    def state_dict(self):
+        return {
+            'wm': self._wm.state_dict(),
+            'task_behavior': self._task_behavior.state_dict()
+        }
+    
+    def load_state_dict(self, state_dict):
+        if 'agent_state_dict' in state_dict:
+            # Handle full checkpoint format
+            full_state = state_dict['agent_state_dict']
+            wm_state = {k[4:]: v for k, v in full_state.items() if k.startswith('_wm.')}
+            behavior_state = {k[15:]: v for k, v in full_state.items() if k.startswith('_task_behavior.')}
+            self._wm.load_state_dict(wm_state)
+            self._task_behavior.load_state_dict(behavior_state)
+        else:
+            # Handle simple format
+            self._wm.load_state_dict(state_dict['wm'])
+            self._task_behavior.load_state_dict(state_dict['task_behavior'])
+    
+    def eval(self):
+        self.training = False
+        self._wm.eval()
+        self._task_behavior.eval()
+
+
 def create_render_env(config, env_id=0):
     """Create a single environment with rendering enabled"""
-    # Override some settings for rendering
-    render_config = config.copy()
-    render_config.envs = 1  # Single environment
-    render_config.parallel = False  # No parallel processing needed
-    
-    return make_env(render_config, "eval", env_id)
+    return make_env(config, "eval", env_id)
 
 
 def play_model(config):
@@ -89,7 +167,10 @@ def play_model(config):
     # Create agent
     print("Creating agent...")
     try:
-        agent = Agent(env.obs_space, env.act_space, step=0, config=config)
+        # Use standard gym spaces directly
+        obs_space = env.observation_space
+        act_space = env.action_space
+        agent = SimpleAgent(obs_space, act_space, config)
         print(f"✅ Agent created")
     except Exception as e:
         print(f"❌ Failed to create agent: {e}")
@@ -101,15 +182,22 @@ def play_model(config):
     print("Loading checkpoint...")
     try:
         checkpoint = torch.load(checkpoint_path, map_location=config.device)
-        agent.load_state_dict(checkpoint["agent_state_dict"])
+        agent.load_state_dict(checkpoint)
         agent.eval()  # Set to evaluation mode
         print(f"✅ Model loaded successfully!")
-        print(f"   Training step: {agent._step}")
     except Exception as e:
         print(f"❌ Failed to load checkpoint: {e}")
-        import traceback
-        traceback.print_exc()
-        return
+        print("Trying alternative checkpoint format...")
+        try:
+            # Try loading just the agent state dict
+            agent.load_state_dict({"agent_state_dict": checkpoint["agent_state_dict"]})
+            agent.eval()
+            print(f"✅ Model loaded with alternative format!")
+        except Exception as e2:
+            print(f"❌ Failed with alternative format too: {e2}")
+            import traceback
+            traceback.print_exc()
+            return
     
     # Play episodes
     print("\n🎮 Starting interactive play...")
@@ -136,6 +224,13 @@ def play_model(config):
                 # Get action from agent
                 with torch.no_grad():
                     action = agent(obs, training=False)
+                
+                # Extract action if it's a dictionary (for discrete action spaces)
+                if isinstance(action, dict) and 'action' in action:
+                    action = action['action']
+                elif isinstance(action, dict):
+                    # For other action formats, take the first value
+                    action = next(iter(action.values()))
                 
                 # Step environment
                 obs, reward, done, info = env.step(action)

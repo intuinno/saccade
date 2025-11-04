@@ -69,10 +69,10 @@ class Logger:
         self._scalars[name] = float(value)
 
     def image(self, name, value):
-        self._images[name] = np.array(value)
+        self._images[name] = np.asarray(value)
 
     def video(self, name, value):
-        self._videos[name] = np.array(value)
+        self._videos[name] = np.asarray(value)
 
     def write(self, fps=False, step=False):
         if not step:
@@ -168,11 +168,11 @@ def simulate(
         action, agent_state = agent(obs, done, agent_state)
         if isinstance(action, dict):
             action = [
-                {k: np.array(action[k][i].detach().cpu()) for k in action}
+                {k: np.asarray(action[k][i].detach().cpu()) for k in action}
                 for i in range(len(envs))
             ]
         else:
-            action = np.array(action)
+            action = np.asarray(action)
         assert len(action) == len(envs)
         # step envs
         results = [e.step(a) for e, a in zip(envs, action)]
@@ -195,7 +195,7 @@ def simulate(
             else:
                 transition["action"] = a
             transition["reward"] = r
-            transition["discount"] = info.get("discount", np.array(1 - float(d)))
+            transition["discount"] = info.get("discount", np.asarray(1 - float(d)))
             add_to_cache(cache, env.id, transition)
 
         if done.any():
@@ -233,7 +233,7 @@ def simulate(
 
                     score = sum(eval_scores) / len(eval_scores)
                     length = sum(eval_lengths) / len(eval_lengths)
-                    logger.video(f"eval_policy", np.array(video)[None])
+                    logger.video(f"eval_policy", np.asarray(video)[None])
 
                     if len(eval_scores) >= episodes and not eval_done:
                         logger.scalar(f"eval_return", score)
@@ -278,7 +278,7 @@ def erase_over_episodes(cache, dataset_size):
 
 
 def convert(value, precision=32):
-    value = np.array(value)
+    value = np.asarray(value)
     if np.issubdtype(value.dtype, np.floating):
         dtype = {16: np.float16, 32: np.float32, 64: np.float64}[precision]
     elif np.issubdtype(value.dtype, np.signedinteger):

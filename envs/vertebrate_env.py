@@ -112,7 +112,26 @@ class VertebrateEnv:
             # For other space types, you might need additional conversion logic
             raise NotImplementedError(f"Action space conversion not implemented for {type(gymnasium_space)}")
 
+    @property
+    def act_space(self):
+        """Alias for action_space to support embodied Driver interface"""
+        # embodied Driver expects action space to be a Dict
+        action_space = self.action_space
+        if isinstance(action_space, gym.spaces.Dict):
+            return action_space
+        else:
+            return gym.spaces.Dict({self._act_key: action_space})
+
+    @property
+    def obs_space(self):
+        """Alias for observation_space to support embodied Driver interface"""
+        # embodied Driver expects observation space to be a Dict (which it already is)
+        return self.observation_space
+
     def step(self, action):
+        # Handle action dictionary format from embodied Driver
+        if isinstance(action, dict) and self._act_key in action:
+            action = action[self._act_key]
         obs, reward, terminated, truncated, info = self._env.step(action)
         if not self._obs_is_dict:
             obs = {self._obs_key: obs}

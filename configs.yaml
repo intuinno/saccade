@@ -13,7 +13,7 @@ defaults:
   eval_episode_num: 10
   log_every: 1e4
   reset_every: 0
-  device: 'cuda:0'
+  device: 'cuda:1'
   compile: True
   precision: 32
   debug: False
@@ -179,8 +179,8 @@ memorymaze:
 vertebrate:
   task: vertebrate_walk
   steps: 1e8
-  parallel: False
-  # envs: 1
+  parallel: True
+  envs: 16
   encdoer: {mlp_keys: '.*', cnn_keys: 'image'}
   decoder: {mlp_keys: '.*', cnn_keys: 'image'}
   actor: {dist: 'onehot', std: 'none'}

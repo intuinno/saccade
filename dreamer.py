@@ -4,7 +4,8 @@ import os
 import pathlib
 import sys
 
-os.environ["MUJOCO_GL"] = "osmesa"
+# Configure EGL for headless rendering
+os.environ["MUJOCO_GL"] = "egl"
 
 import numpy as np
 import ruamel.yaml as yaml
@@ -270,12 +271,19 @@ def make_dataset(episodes, config):
 def make_env(config, mode, id):
     suite, task = config.task.split("_", 1)
     if suite == "dmc":
-        import envs.dmc as dmc
-
-        env = dmc.DeepMindControl(
-            task, config.action_repeat, config.size, seed=config.seed + id
-        )
-        env = wrappers.NormalizeActions(env)
+        try:
+            import envs.dmc as dmc
+            env = dmc.DeepMindControl(
+                task, config.action_repeat, config.size, seed=config.seed + id
+            )
+            env = wrappers.NormalizeActions(env)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to create DMC environment '{task}'. "
+                f"This might be due to OpenGL/Mesa issues. "
+                f"Try installing: pip install 'mujoco>=2.3' mesa-utils "
+                f"Original error: {e}"
+            ) from e
     elif suite == "atari":
         import envs.atari as atari
 
@@ -318,9 +326,16 @@ def make_env(config, mode, id):
         env = minecraft.make_env(task, size=config.size, break_speed=config.break_speed)
         env = wrappers.OneHotAction(env)
     elif suite == "vertebrate":
-        import envs.vertebrate_env as vertebrate_env
-        env = vertebrate_env.VertebrateEnv()
-        env = wrappers.OneHotAction(env)
+        try:
+            import envs.vertebrate_env as vertebrate_env
+            env = vertebrate_env.VertebrateEnv()
+            env = wrappers.OneHotAction(env)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to create vertebrate environment. "
+                f"Make sure the vertebrate_env package is properly installed. "
+                f"Original error: {e}"
+            ) from e
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)
@@ -478,7 +493,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--configs", nargs="+")
     args, remaining = parser.parse_known_args()
-    configs = yaml.safe_load(
+    yaml_loader = yaml.YAML(typ='safe', pure=True)
+    configs = yaml_loader.load(
         (pathlib.Path(sys.argv[0]).parent / "configs.yaml").read_text()
     )
 

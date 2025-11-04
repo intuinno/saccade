@@ -44,7 +44,25 @@ class DeepMindControl:
         spec = self._env.action_spec()
         return gym.spaces.Box(spec.minimum, spec.maximum, dtype=np.float32)
 
+    @property
+    def act_space(self):
+        """Alias for action_space to support embodied Driver interface"""
+        # embodied Driver expects action space to be a Dict
+        action_space = self.action_space
+        if isinstance(action_space, gym.spaces.Dict):
+            return action_space
+        else:
+            return gym.spaces.Dict({'action': action_space})
+
+    @property
+    def obs_space(self):
+        """Alias for observation_space to support embodied Driver interface"""
+        return self.observation_space
+
     def step(self, action):
+        # Handle action dictionary format from embodied Driver
+        if isinstance(action, dict) and 'action' in action:
+            action = action['action']
         assert np.isfinite(action).all(), action
         reward = 0
         for _ in range(self._action_repeat):

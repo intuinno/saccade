@@ -351,16 +351,71 @@ def main(config):
                 video_pred = agent._wm.video_pred(next(eval_dataset))
                 logger.video("eval_openl", to_np(video_pred))
         print("Start training.")
-        state = tools.simulate(
-            agent,
-            train_envs,
-            train_eps,
-            config.traindir,
-            logger,
-            limit=config.dataset_size,
-            steps=config.eval_every,
-            state=state,
-        )
+        
+        # Training step counter to accumulate training debt
+        training_debt = 0
+        
+        def fast_policy(obs, reset, state=None):
+            """Fast policy that generates actions without training bottleneck"""
+            nonlocal training_debt
+            
+            # Accumulate training debt instead of blocking action generation
+            step = agent._step
+            if agent._should_pretrain():
+                training_debt += config.pretrain
+            else:
+                training_debt += agent._should_train(step)
+            
+            # Generate actions fast (no training)
+            policy_output, new_state = agent._policy(obs, state, training=True)
+            
+            # Update step counter
+            agent._step += len(reset)
+            logger.step = config.action_repeat * agent._step
+            
+            return policy_output, new_state
+        
+        # Custom simulate loop with decoupled training
+        import time
+        steps_completed = 0
+        target_steps = config.eval_every
+        
+        while steps_completed < target_steps:
+            # Run a batch of environment steps (fast)
+            batch_steps = min(32, target_steps - steps_completed)  # Process in batches
+            
+            temp_state = tools.simulate(
+                fast_policy,
+                train_envs,
+                train_eps,
+                config.traindir,
+                logger,
+                limit=config.dataset_size,
+                steps=batch_steps,
+                state=state if steps_completed == 0 else temp_state,
+            )
+            
+            # Pay back training debt in batch (without blocking environments)
+            if training_debt > 0:
+                print(f"🔥 Paying training debt: {training_debt} steps")
+                for _ in range(min(training_debt, 50)):  # Cap training steps per batch
+                    agent._train(next(train_dataset))
+                    agent._update_count += 1
+                    agent._metrics["update_count"] = agent._update_count
+                training_debt = max(0, training_debt - 50)
+                
+                # Log if needed
+                if agent._should_log(agent._step):
+                    for name, values in agent._metrics.items():
+                        logger.scalar(name, float(np.mean(values)))
+                        agent._metrics[name] = []
+                    if config.video_pred_log:
+                        openl = agent._wm.video_pred(next(train_dataset))
+                        logger.video("train_openl", to_np(openl))
+                    logger.write(fps=True)
+            
+            steps_completed += batch_steps
+            state = temp_state
         items_to_save = {
             "agent_state_dict": agent.state_dict(),
             "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),

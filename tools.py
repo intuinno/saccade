@@ -180,14 +180,33 @@ def simulate(
                 add_to_cache(cache, envs[index].id, t)
                 # replace obs with done by initial state
                 obs[index] = result
-        # step agents
-        obs = {k: np.stack([o[k] for o in obs]) for k in obs[0] if "log_" not in k}
+        # step agents - optimized observation stacking
+        if len(envs) > 1:
+            # Vectorized observation stacking (faster than list comprehension)
+            obs_dict = {}
+            for k in obs[0]:
+                if "log_" not in k:
+                    obs_values = [o[k] for o in obs]  # Still need this for different obs structures
+                    obs_dict[k] = np.stack(obs_values)
+            obs = obs_dict
+        else:
+            obs = {k: v for k, v in obs[0].items() if "log_" not in k}
+            
         action, agent_state = agent(obs, done, agent_state)
+        
+        # Optimized action processing
         if isinstance(action, dict):
-            action = [
-                {k: np.asarray(action[k][i].detach().cpu()) for k in action}
-                for i in range(len(envs))
-            ]
+            if len(envs) > 1:
+                # Vectorized action processing (faster than nested list comprehension)
+                action_list = []
+                for i in range(len(envs)):
+                    env_action = {}
+                    for k in action:
+                        env_action[k] = np.asarray(action[k][i].detach().cpu())
+                    action_list.append(env_action)
+                action = action_list
+            else:
+                action = [{k: np.asarray(v.detach().cpu()) for k, v in action.items()}]
         else:
             action = np.asarray(action)
         assert len(action) == len(envs)
@@ -212,10 +231,13 @@ def simulate(
             results = [e.step(a) for e, a in zip(envs, action)]
             results = [r() for r in results]
         
-        obs, reward, done = zip(*[p[:3] for p in results])
-        obs = list(obs)
-        reward = list(reward)
-        done = np.stack(done)
+        # Optimized result unpacking (avoid list comprehension in zip)
+        if len(results) > 1:
+            obs = [result[0] for result in results]
+            reward = [result[1] for result in results] 
+            done = np.stack([result[2] for result in results])
+        else:
+            obs, reward, done = [results[0][0]], [results[0][1]], np.array([results[0][2]])
         episode += int(done.sum())
         length += 1
         step += len(envs)
@@ -223,11 +245,16 @@ def simulate(
         
         if intrinsic_reward == "prediction_error":
             obs_copy = obs.copy()
-            obs_copy = {
-                k: np.stack([o[k] for o in obs_copy])
-                for k in obs_copy[0]
-                if "log_" not in k
-            }
+            # Optimized observation stacking for intrinsic reward
+            if len(envs) > 1:
+                obs_dict = {}
+                for k in obs_copy[0]:
+                    if "log_" not in k:
+                        obs_values = [o[k] for o in obs_copy]
+                        obs_dict[k] = np.stack(obs_values)
+                obs_copy = obs_dict
+            else:
+                obs_copy = {k: v for k, v in obs_copy[0].items() if "log_" not in k}
             i_reward = agent.intrinsic_reward(obs_copy, agent_state)
         else:
             i_reward = [0] * len(envs)

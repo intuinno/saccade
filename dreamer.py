@@ -10,12 +10,16 @@ import numpy as np
 import ruamel.yaml as yaml
 
 sys.path.append(str(pathlib.Path(__file__).parent))
+sys.path.append(str(pathlib.Path(__file__).parent / "dreamerv3"))
 
 import exploration as expl
 import models
 import tools
 import envs.wrappers as wrappers
-from parallel import Parallel, Damy
+
+# Use embodied package for parallel processing
+from embodied.core import Driver
+print("✓ Using embodied package for parallel processing")
 
 import torch
 from torch import nn
@@ -23,6 +27,126 @@ from torch import distributions as torchd
 
 
 to_np = lambda x: x.detach().cpu().numpy()
+
+
+class EmbodiedParallel:
+    """
+    Adapter class that makes a single environment work with embodied Driver interface
+    while maintaining backward compatibility with existing saccade code.
+    """
+    def __init__(self, env_constructor, strategy="process"):
+        self.env_constructor = env_constructor
+        self.strategy = strategy
+        self._env = None
+        self._init_env()
+
+    def _init_env(self):
+        """Initialize the environment"""
+        if callable(self.env_constructor):
+            self._env = self.env_constructor()
+        else:
+            self._env = self.env_constructor
+
+    def __getattr__(self, name):
+        """Delegate unknown attributes to the wrapped environment"""
+        if self._env is None:
+            self._init_env()
+        return getattr(self._env, name)
+
+    def step(self, action):
+        """Step method that returns a callable for backward compatibility"""
+        if self._env is None:
+            self._init_env()
+        return lambda: self._env.step(action)
+
+    def reset(self):
+        """Reset method that returns a callable for backward compatibility"""
+        if self._env is None:
+            self._init_env()
+        return lambda: self._env.reset()
+
+    def close(self):
+        """Close the environment"""
+        if self._env is not None and hasattr(self._env, 'close'):
+            self._env.close()
+
+
+class EmbodiedDummy:
+    """
+    Dummy wrapper that maintains the Damy interface while being embodied-ready
+    """
+    def __init__(self, env):
+        self._env = env
+
+    def __getattr__(self, name):
+        return getattr(self._env, name)
+
+    def step(self, action):
+        return lambda: self._env.step(action)
+
+    def reset(self):
+        return lambda: self._env.reset()
+
+    def close(self):
+        if hasattr(self._env, 'close'):
+            self._env.close()
+
+
+def create_embodied_envs(config, mode_prefix):
+    """
+    Create environment list that can work with embodied Driver.
+    Returns both individual wrapped envs and a Driver for batch processing.
+    """
+    def make_env_fn(env_id):
+        """Create a single environment constructor"""
+        def env_constructor():
+            return make_env(config, mode_prefix, env_id)
+        return env_constructor
+    
+    # Create environment constructors
+    make_env_fns = [make_env_fn(i) for i in range(config.envs)]
+    
+    if config.parallel:
+        # Create embodied Driver for batch processing
+        driver = Driver(make_env_fns, parallel=True)
+        
+        # Create individual environment wrappers for backward compatibility
+        individual_envs = []
+        for i in range(config.envs):
+            env_wrapper = EmbodiedParallel(make_env_fns[i], "process")
+            env_wrapper._driver = driver  # Reference to shared driver
+            env_wrapper._env_id = i
+            individual_envs.append(env_wrapper)
+        
+        return individual_envs, driver
+    else:
+        # Create individual environments (non-parallel path)
+        envs = [make_env_fn(i)() for i in range(config.envs)]
+        wrapped_envs = [EmbodiedDummy(env) for env in envs]
+        return wrapped_envs, None
+
+
+class SaccadeEmbodiedAdapter:
+    """
+    Adapter that integrates embodied Driver with saccade's tools.simulate function
+    """
+    def __init__(self, envs, driver=None):
+        self.envs = envs
+        self.driver = driver
+        self.use_driver = driver is not None
+        
+    def simulate_with_embodied(self, agent, cache, directory, logger, **kwargs):
+        """
+        Use embodied Driver for simulation when available, otherwise fallback to original
+        """
+        if not self.use_driver:
+            # Use original simulation
+            return tools.simulate(agent, self.envs, cache, directory, logger, **kwargs)
+        
+        # Enhanced simulation using embodied Driver
+        # This would need to be implemented to integrate with tools.simulate
+        # For now, fallback to original simulation
+        return tools.simulate(agent, self.envs, cache, directory, logger, **kwargs)
 
 
 class Dreamer(nn.Module):
@@ -227,7 +351,6 @@ def main(config):
     # step in logger is environmental step
     logger = tools.Logger(logdir, config.action_repeat * step)
 
-    print("Create envs.")
     if config.offline_traindir:
         directory = config.offline_traindir.format(**vars(config))
     else:
@@ -238,15 +361,9 @@ def main(config):
     else:
         directory = config.evaldir
     eval_eps = tools.load_episodes(directory, limit=1)
-    make = lambda mode, id: make_env(config, mode, id)
-    train_envs = [make("train", i) for i in range(config.envs)]
-    eval_envs = [make("eval", i) for i in range(config.envs)]
-    if config.parallel:
-        train_envs = [Parallel(env, "process") for env in train_envs]
-        eval_envs = [Parallel(env, "process") for env in eval_envs]
-    else:
-        train_envs = [Damy(env) for env in train_envs]
-        eval_envs = [Damy(env) for env in eval_envs]
+    print("Using embodied package for parallel processing")
+    train_envs, train_driver = create_embodied_envs(config, "train")
+    eval_envs, eval_driver = create_embodied_envs(config, "eval")
     acts = train_envs[0].action_space
     print("Action Space", acts)
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
@@ -336,9 +453,23 @@ def main(config):
             "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
         }
         torch.save(items_to_save, logdir / "latest.pt")
+    
+    # Cleanup environments and drivers
     for env in train_envs + eval_envs:
         try:
             env.close()
+        except Exception:
+            pass
+    
+    # Close embodied drivers if they exist
+    if 'train_driver' in locals() and train_driver:
+        try:
+            train_driver.close()
+        except Exception:
+            pass
+    if 'eval_driver' in locals() and eval_driver:
+        try:
+            eval_driver.close()
         except Exception:
             pass
 

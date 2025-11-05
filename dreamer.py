@@ -4,7 +4,7 @@ import os
 import pathlib
 import sys
 
-os.environ["MUJOCO_GL"] = "osmesa"
+os.environ["MUJOCO_GL"] = "egl"
 
 import numpy as np
 import ruamel.yaml as yaml
@@ -15,7 +15,7 @@ import exploration as expl
 import models
 import tools
 import envs.wrappers as wrappers
-from parallel import Parallel, Damy
+from tianshou.env import ShmemVectorEnv, SubprocVectorEnv
 
 import torch
 from torch import nn
@@ -239,31 +239,34 @@ def main(config):
         directory = config.evaldir
     eval_eps = tools.load_episodes(directory, limit=1)
     make = lambda mode, id: make_env(config, mode, id)
-    train_envs = [make("train", i) for i in range(config.envs)]
-    eval_envs = [make("eval", i) for i in range(config.envs)]
-    if config.parallel:
-        train_envs = [Parallel(env, "process") for env in train_envs]
-        eval_envs = [Parallel(env, "process") for env in eval_envs]
-    else:
-        train_envs = [Damy(env) for env in train_envs]
-        eval_envs = [Damy(env) for env in eval_envs]
-    acts = train_envs[0].action_space
-    print("Action Space", acts)
-    config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
+    
+    # Create vectorized environments using Tianshou's ShmemVectorEnv
+    train_env_fns = [lambda i=i: make("train", i) for i in range(config.envs)]
+    eval_env_fns = [lambda i=i: make("eval", i) for i in range(config.envs)]
+    
+    # train_envs = ShmemVectorEnv(train_env_fns)
+    train_envs = SubprocVectorEnv(train_env_fns)
+    eval_envs = SubprocVectorEnv(eval_env_fns)
+    
+    # Get action space from the vectorized environment
+    act_space = train_envs.action_space[0]
+    obs_space = train_envs.observation_space[0]
+    print("Action Space", act_space)
+    config.num_actions = act_space.n if hasattr(act_space, "n") else act_space.shape[0]
 
     state = None
     if not config.offline_traindir:
         prefill = max(0, config.prefill - count_steps(config.traindir))
         print(f"Prefill dataset ({prefill} steps).")
-        if hasattr(acts, "discrete"):
+        if hasattr(act_space, "discrete"):
             random_actor = tools.OneHotDist(
                 torch.zeros(config.num_actions).repeat(config.envs, 1)
             )
         else:
             random_actor = torchd.independent.Independent(
                 torchd.uniform.Uniform(
-                    torch.tensor(acts.low).repeat(config.envs, 1),
-                    torch.tensor(acts.high).repeat(config.envs, 1),
+                    torch.tensor(act_space.low).repeat(config.envs, 1),
+                    torch.tensor(act_space.high).repeat(config.envs, 1),
                 ),
                 1,
             )
@@ -288,9 +291,11 @@ def main(config):
     print("Simulate agent.")
     train_dataset = make_dataset(train_eps, config)
     eval_dataset = make_dataset(eval_eps, config)
+    
+    # Use observation_space and action_space from the vectorized environment
     agent = Dreamer(
-        train_envs[0].observation_space,
-        train_envs[0].action_space,
+        obs_space,
+        act_space,
         config,
         logger,
         train_dataset,
@@ -347,9 +352,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--configs", nargs="+")
     args, remaining = parser.parse_known_args()
-    configs = yaml.safe_load(
-        (pathlib.Path(sys.argv[0]).parent / "configs.yaml").read_text()
-    )
+    
+    # Use new ruamel.yaml API
+    yaml_loader = yaml.YAML(typ='safe', pure=True)
+    with open(pathlib.Path(sys.argv[0]).parent / "configs.yaml") as f:
+        configs = yaml_loader.load(f)
 
     def recursive_update(base, update):
         for key, value in update.items():

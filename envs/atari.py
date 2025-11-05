@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 
 
@@ -38,7 +38,7 @@ class Atari:
             from PIL import Image
 
             self._image = Image
-        import gym.envs.atari
+        from gymnasium.envs.atari import AtariEnv
 
         if name == "james_bond":
             name = "jamesbond"
@@ -51,7 +51,7 @@ class Atari:
         self._length = length
         self._random = np.random.RandomState(seed)
         with self.LOCK:
-            self._env = gym.envs.atari.AtariEnv(
+            self._env = AtariEnv(
                 game=name,
                 obs_type="image",
                 frameskip=1,
@@ -111,27 +111,26 @@ class Atari:
             self._buffer[1][:] = self._buffer[0][:]
         self._screen(self._buffer[0])
         self._done = over or (self._length and self._step >= self._length)
-        return self._obs(
-            total,
-            is_last=self._done or (dead and self._lives == "reset"),
-            is_terminal=dead or over,
-        )
+        obs, _, _, info = self._obs(total, is_first=False, is_last=self._done, is_terminal=dead or over)
+        terminated = dead or over
+        truncated = self._done and not terminated
+        return obs, total, terminated, truncated, info
 
     def reset(self):
-        self._env.reset()
+        obs, info = self._env.reset()
         if self._noops:
             for _ in range(self._random.randint(self._noops)):
-                _, _, dead, _ = self._env.step(0)
-                if dead:
-                    self._env.reset()
+                obs, _, terminated, truncated, info = self._env.step(0)
+                if terminated or truncated:
+                    obs, info = self._env.reset()
         self._last_lives = self._ale.lives()
         self._screen(self._buffer[0])
         self._buffer[1].fill(0)
 
         self._done = False
         self._step = 0
-        obs, reward, is_terminal, _ = self._obs(0.0, is_first=True)
-        return obs
+        obs, _, _, info = self._obs(0.0, is_first=True)
+        return obs, info
 
     def _obs(self, reward, is_first=False, is_last=False, is_terminal=False):
         np.maximum(self._buffer[0], self._buffer[1], out=self._buffer[0])

@@ -150,9 +150,8 @@ def simulate(
     while (steps and step < steps) or (episodes and episode < episodes):
         # reset envs if necessary
         if done.any():
-            indices = [index for index, d in enumerate(done) if d]
-            results = [envs[i].reset() for i in indices]
-            results = [r() for r in results]
+            indices = np.where(done)[0]
+            results, _ = envs.reset(indices)
             for index, result in zip(indices, results):
                 t = result.copy()
                 t = {k: convert(v) for k, v in t.items()}
@@ -160,7 +159,7 @@ def simulate(
                 t["reward"] = 0.0
                 t["discount"] = 1.0
                 # initial state should be added to cache
-                add_to_cache(cache, envs[index].id, t)
+                add_to_cache(cache, envs.get_env_attr("id", index)[0], t)
                 # replace obs with done by initial state
                 obs[index] = result
         # step agents
@@ -168,26 +167,24 @@ def simulate(
         action, agent_state = agent(obs, done, agent_state)
         if isinstance(action, dict):
             action = [
-                {k: np.array(action[k][i].detach().cpu()) for k in action}
+                {k: to_np(action[k][i]) for k in action}
                 for i in range(len(envs))
             ]
         else:
             action = np.array(action)
         assert len(action) == len(envs)
         # step envs
-        results = [e.step(a) for e, a in zip(envs, action)]
-        results = [r() for r in results]
-        obs, reward, done = zip(*[p[:3] for p in results])
+       
+        obs, reward, terminated, truncated, _  = envs.step(action) 
         obs = list(obs)
         reward = list(reward)
-        done = np.stack(done)
+        done = np.stack(np.logical_or(terminated, truncated ))
         episode += int(done.sum())
         length += 1
         step += len(envs)
         length *= 1 - done
         # add to cache
-        for a, result, env in zip(action, results, envs):
-            o, r, d, info = result
+        for a, o, r, d, index in zip(action, obs, reward, done, range(len(envs))):
             o = {k: convert(v) for k, v in o.items()}
             transition = o.copy()
             if isinstance(a, dict):
@@ -195,25 +192,26 @@ def simulate(
             else:
                 transition["action"] = a
             transition["reward"] = r
-            transition["discount"] = info.get("discount", np.array(1 - float(d)))
-            add_to_cache(cache, env.id, transition)
+            transition["discount"] =  np.array(1 - float(d))
+            add_to_cache(cache, envs.get_env_attr("id", index)[0], transition)
 
         if done.any():
             indices = [index for index, d in enumerate(done) if d]
             # logging for done episode
             for i in indices:
-                save_episodes(directory, {envs[i].id: cache[envs[i].id]})
-                length = len(cache[envs[i].id]["reward"]) - 1
-                score = float(np.array(cache[envs[i].id]["reward"]).sum())
-                video = cache[envs[i].id]["image"]
+                id = envs.get_env_attr('id', i)[0]
+                save_episodes(directory, {id: cache[id]}   ) 
+                length = len(cache[id]["reward"]) - 1
+                score = float(np.array(cache[id]["reward"]).sum())
+                video = cache[id]["image"]
                 # record logs given from environments
-                for key in list(cache[envs[i].id].keys()):
+                for key in list(cache[id].keys()):
                     if "log_" in key:
                         logger.scalar(
-                            key, float(np.array(cache[envs[i].id][key]).sum())
+                            key, float(np.array(cache[id][key]).sum())
                         )
                         # log items won't be used later
-                        cache[envs[i].id].pop(key)
+                        cache[id].pop(key)
 
                 if not is_eval:
                     step_in_dataset = erase_over_episodes(cache, limit)
@@ -949,7 +947,7 @@ def tensorstats(tensor, prefix=None):
 
 def set_seed_everywhere(seed):
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
+    if torch.cuda is not None:
         torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)

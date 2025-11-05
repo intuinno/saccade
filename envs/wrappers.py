@@ -1,5 +1,5 @@
 import datetime
-import gym
+import gymnasium as gym
 import numpy as np
 import uuid
 
@@ -11,24 +11,26 @@ class TimeLimit(gym.Wrapper):
         self._step = None
 
     def step(self, action):
-        assert self._step is not None, "Must reset environment."
-        obs, reward, done, info = self.env.step(action)
+        assert self._step is not None, "Must reset environment before stepping."
+        obs, reward, terminated, truncated, info = self.env.step(action)
         self._step += 1
         if self._step >= self._duration:
-            done = True
+            # In gymnasium, a time limit typically results in truncation
+            truncated = True
             if "discount" not in info:
                 info["discount"] = np.array(1.0).astype(np.float32)
             self._step = None
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info
 
-    def reset(self):
+    def reset(self, **kwargs):
         self._step = 0
-        return self.env.reset()
+        obs, info = self.env.reset(**kwargs)
+        return obs, info
 
 
 class NormalizeActions(gym.Wrapper):
     def __init__(self, env):
-        super().__init__(env)
+        super().__init__(env) # This will now call gymnasium.Wrapper.__init__
         self._mask = np.logical_and(
             np.isfinite(env.action_space.low), np.isfinite(env.action_space.high)
         )
@@ -41,16 +43,17 @@ class NormalizeActions(gym.Wrapper):
     def step(self, action):
         original = (action + 1) / 2 * (self._high - self._low) + self._low
         original = np.where(self._mask, original, action)
-        return self.env.step(original)
+        obs, reward, terminated, truncated, info = self.env.step(original)
+        return obs, reward, terminated, truncated, info
 
 
 class OneHotAction(gym.Wrapper):
     def __init__(self, env):
-        assert isinstance(env.action_space, gym.spaces.Discrete)
-        super().__init__(env)
+        assert isinstance(env.action_space, gym.spaces.Discrete), "Action space must be Discrete for OneHotAction wrapper."
+        super().__init__(env) # This will now call gymnasium.Wrapper.__init__
         self._random = np.random.RandomState()
         shape = (self.env.action_space.n,)
-        space = gym.spaces.Box(low=0, high=1, shape=shape, dtype=np.float32)
+        space = gym.spaces.Box(low=0, high=1, shape=shape, dtype=np.float32) # gymnasium.spaces.Box
         space.discrete = True
         self.action_space = space
 
@@ -60,10 +63,12 @@ class OneHotAction(gym.Wrapper):
         reference[index] = 1
         if not np.allclose(reference, action):
             raise ValueError(f"Invalid one-hot action:\n{action}")
-        return self.env.step(index)
+        obs, reward, terminated, truncated, info = self.env.step(index)
+        return obs, reward, terminated, truncated, info
 
-    def reset(self):
-        return self.env.reset()
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        return obs, info
 
     def _sample_action(self):
         actions = self.env.action_space.n
@@ -75,34 +80,35 @@ class OneHotAction(gym.Wrapper):
 
 class RewardObs(gym.Wrapper):
     def __init__(self, env):
-        super().__init__(env)
+        super().__init__(env) # This will now call gymnasium.Wrapper.__init__
         spaces = self.env.observation_space.spaces
         if "obs_reward" not in spaces:
-            spaces["obs_reward"] = gym.spaces.Box(
+            spaces["obs_reward"] = gym.spaces.Box( # gymnasium.spaces.Box
                 -np.inf, np.inf, shape=(1,), dtype=np.float32
             )
-        self.observation_space = gym.spaces.Dict(spaces)
+        self.observation_space = gym.spaces.Dict(spaces) # gymnasium.spaces.Dict
 
     def step(self, action):
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
         if "obs_reward" not in obs:
             obs["obs_reward"] = np.array([reward], dtype=np.float32)
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info
 
-    def reset(self):
-        obs = self.env.reset()
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
         if "obs_reward" not in obs:
             obs["obs_reward"] = np.array([0.0], dtype=np.float32)
-        return obs
+        return obs, info
 
 
 class SelectAction(gym.Wrapper):
     def __init__(self, env, key):
-        super().__init__(env)
+        super().__init__(env) # This will now call gymnasium.Wrapper.__init__
         self._key = key
 
     def step(self, action):
-        return self.env.step(action[self._key])
+        obs, reward, terminated, truncated, info = self.env.step(action[self._key])
+        return obs, reward, terminated, truncated, info
 
 
 class UUID(gym.Wrapper):
@@ -111,7 +117,8 @@ class UUID(gym.Wrapper):
         timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
         self.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
 
-    def reset(self):
+    def reset(self, **kwargs):
         timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
         self.id = f"{timestamp}-{str(uuid.uuid4().hex)}"
-        return self.env.reset()
+        obs, info = self.env.reset(**kwargs)
+        return obs, info

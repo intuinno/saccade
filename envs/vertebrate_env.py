@@ -5,9 +5,6 @@ from gymnasium import spaces
 import vertebrate_env
 import einops
 import numpy as np
-import os
-import gym 
-
 
 
 
@@ -25,7 +22,7 @@ def last_camera_obs(obs):
     return obs
     
 
-class VertebrateEnv:
+class VertebrateEnv(gymnasium.Env):
     def __init__(self, obs_key='egocentric_image', act_key='action', seed=0,  stack_camera=True,):
         self._env = gymnasium.make("vertebrate_env/VertebrateEnv-v0", render_mode="rgb_array", temp_k=16, seed=seed)
         if stack_camera:
@@ -55,78 +52,41 @@ class VertebrateEnv:
         except AttributeError:
             raise ValueError(name)
 
-    def _convert_gymnasium_space_to_gym(self, space):
-        """Convert gymnasium space to gym space"""
-        if isinstance(space, gymnasium.spaces.Box):
-            return gym.spaces.Box(
-                low=space.low, 
-                high=space.high, 
-                shape=space.shape, 
-                dtype=space.dtype
-            )
-        elif isinstance(space, gymnasium.spaces.Discrete):
-            return gym.spaces.Discrete(space.n)
-        elif isinstance(space, gymnasium.spaces.MultiDiscrete):
-            return gym.spaces.MultiDiscrete(space.nvec)
-        elif isinstance(space, gymnasium.spaces.MultiBinary):
-            return gym.spaces.MultiBinary(space.n)
-        elif isinstance(space, gymnasium.spaces.Dict):
-            converted_spaces = {}
-            for key, subspace in space.spaces.items():
-                converted_spaces[key] = self._convert_gymnasium_space_to_gym(subspace)
-            return gym.spaces.Dict(converted_spaces)
-        elif isinstance(space, gymnasium.spaces.Tuple):
-            converted_spaces = []
-            for subspace in space.spaces:
-                converted_spaces.append(self._convert_gymnasium_space_to_gym(subspace))
-            return gym.spaces.Tuple(converted_spaces)
-        else:
-            raise NotImplementedError(f"Space conversion not implemented for {type(space)}")
-
     @property
     def observation_space(self):
         if self._obs_is_dict:
-            # Convert gymnasium spaces to gym spaces
-            converted_spaces = {}
-            for key, space in self._env.observation_space.spaces.items():
-                converted_spaces[key] = self._convert_gymnasium_space_to_gym(space)
-            spaces = converted_spaces
+            spaces = self._env.observation_space.spaces
         else:
-            spaces = {self._obs_key: self._convert_gymnasium_space_to_gym(self._env.observation_space)}
+            spaces = {self._obs_key: self._env.observation_space}
         
-        return gym.spaces.Dict(
+        return gymnasium.spaces.Dict(
             {
                 **spaces,
-                "is_first": gym.spaces.Box(0, 1, (), dtype=bool),
-                "is_last": gym.spaces.Box(0, 1, (), dtype=bool),
-                "is_terminal": gym.spaces.Box(0, 1, (), dtype=bool),
+               "is_first": gymnasium.spaces.Box(0, 1, (), dtype=np.bool_),
+                "is_last": gymnasium.spaces.Box(0, 1, (), dtype=np.bool_),
+                "is_terminal": gymnasium.spaces.Box(0, 1, (), dtype=np.bool_),
             }
         )
 
     @property
     def action_space(self):
         gymnasium_space = self._env.action_space
-        if hasattr(gymnasium_space, 'n'):  # Discrete space
-            return gym.spaces.Discrete(gymnasium_space.n)
-        else:
-            # For other space types, you might need additional conversion logic
-            raise NotImplementedError(f"Action space conversion not implemented for {type(gymnasium_space)}")
+        return gymnasium_space
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self._env.step(action)
         if not self._obs_is_dict:
             obs = {self._obs_key: obs}
-        done = terminated or truncated
         obs["is_first"] = False
-        obs["is_last"] = done
+        obs["is_last"] = terminated or truncated
         obs["is_terminal"] = terminated
-        return obs, reward, done, info
+        return obs, reward, terminated, truncated, info
 
-    def reset(self):
+    def reset(self, seed=42, **kwargs):
         obs, info = self._env.reset()
         if not self._obs_is_dict:
             obs = {self._obs_key: obs}
         obs["is_first"] = True
         obs["is_last"] = False
         obs["is_terminal"] = False
-        return obs
+        return obs, info

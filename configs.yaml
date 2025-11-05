@@ -180,7 +180,7 @@ vertebrate:
   task: vertebrate_walk
   steps: 1e8
   parallel: False
-  # envs: 1
+  envs: 32
   encdoer: {mlp_keys: '.*', cnn_keys: 'image'}
   decoder: {mlp_keys: '.*', cnn_keys: 'image'}
   actor: {dist: 'onehot', std: 'none'}

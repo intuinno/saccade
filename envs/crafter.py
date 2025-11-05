@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 
 
@@ -55,7 +55,9 @@ class Crafter:
             "log_reward": np.float32(info["reward"] if info else 0.0),
             **log_achievements,
         }
-        return obs, reward, done, info
+        terminated = done
+        truncated = False
+        return obs, reward, terminated, truncated, info
 
     def render(self):
         return self._env.render()
@@ -68,4 +70,5 @@ class Crafter:
             "is_last": False,
             "is_terminal": False,
         }
-        return obs
+        info = {}
+        return obs, info

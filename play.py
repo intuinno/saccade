@@ -483,14 +483,6 @@ def play_model(config, temp_k=4):
                 f"Episode {episode} finished: {step} steps, {total_reward:.3f} total reward"
             )
 
-            # Ask if user wants to continue
-            try:
-                response = input("\nContinue? (y/n/Enter=yes): ").strip().lower()
-                if response in ["n", "no", "q", "quit"]:
-                    break
-            except KeyboardInterrupt:
-                break
-
     except KeyboardInterrupt:
         print("\n\n🛑 Stopping...")
 
@@ -532,7 +524,7 @@ def main():
         "--temp_k",
         type=int,
         default=16,
-        help="Temporal abstraction parameter (lower = more responsive, default: 4)",
+        help="Temporal abstraction parameter (lower = more responsive, default: 16)",
     )
 
     args = parser.parse_args()

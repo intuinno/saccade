@@ -106,7 +106,10 @@ def make_env(config, mode, id, render_mode=None, temp_k=4):
         # Use configurable temp_k for more responsive rendering
         if render_mode == "human":
             env = vertebrate_env.VertebrateEnv(
-                seed=config.seed + id, render_mode="human", temp_k=temp_k
+                seed=config.seed + id,
+                render_mode="human",
+                temp_k=temp_k,
+                model_name=config.model_path,
             )
         else:
             env = vertebrate_env.VertebrateEnv(seed=config.seed + id, temp_k=temp_k)
@@ -283,7 +286,13 @@ class SimpleAgent:
 
 def create_render_env(config, env_id=0, temp_k=4):
     """Create a single environment with rendering enabled"""
-    return make_env(config, "eval", env_id, render_mode="human", temp_k=temp_k)
+    return make_env(
+        config,
+        "eval",
+        env_id,
+        render_mode="human",
+        temp_k=temp_k,
+    )
 
 
 def play_model(config, temp_k=4):

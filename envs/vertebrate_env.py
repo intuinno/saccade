@@ -33,11 +33,13 @@ class VertebrateEnv:
         stack_camera=True,
         render_mode="rgb_array",
         temp_k=16,
+        model_name="vertebrate_model",
     ):
         self._env = gymnasium.make(
             "vertebrate_env/VertebrateEnv-v0",
             render_mode=render_mode,
             temp_k=temp_k,
+            model_name=model_name,
         )
         self._seed = seed
         if stack_camera:

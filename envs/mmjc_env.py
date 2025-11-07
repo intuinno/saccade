@@ -1,14 +1,14 @@
 import gymnasium
 from gymnasium.wrappers import TransformObservation
 from gymnasium import spaces
-import vertebrate_env
+import mmjc_env
 import einops
 import numpy as np
 
 
 class MMJCENV(gymnasium.Env):
     def __init__(self, obs_key='image', act_key='action', seed=0):
-        self._env = gymnasium.make("vertebrate_env/MMJCENV-v0", render_mode="rgb_array")
+        self._env = gymnasium.make("mmjc-easy", render_mode="rgb_array")
         self._obs_is_dict = hasattr(self._env.observation_space, 'spaces')
         self._obs_key = obs_key
         self._act_key = act_key

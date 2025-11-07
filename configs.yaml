@@ -188,6 +188,18 @@ vertebrate:
   actor: {dist: 'onehot', std: 'none'}
   imag_gradient: 'reinforce'
 
+mmjc:
+  task: mmjc_walk
+  stapes: 1e10
+  parallel: True
+  envs: 16
+  imag_gradient: 'reinforce'
+  batch_size: 32
+  # batch_length: 256
+  train_ratio: 512
+  encdoer: {mlp_keys: '.*', cnn_keys: 'image'}
+  decoder: {mlp_keys: '.*', cnn_keys: 'image'}
+  
 
 debug:
   debug: True

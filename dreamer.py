@@ -197,6 +197,9 @@ def make_env(config, mode, id):
         import envs.vertebrate_env as vertebrate_env
         env = vertebrate_env.VertebrateEnv()
         env = wrappers.OneHotAction(env)
+    elif suite == "mmjc":
+        import envs.mmjc_env as mmjc_env
+        env = mmjc_env.MMJCENV()
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)

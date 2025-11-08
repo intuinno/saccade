@@ -7,6 +7,12 @@ result*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
+data/
+datasets/
+models/
+videos/
+.DS_Store
+
 *.py[cod]
 *$py.class
 

@@ -195,10 +195,12 @@ def make_env(config, mode, id):
         env = wrappers.OneHotAction(env)
     elif suite == "vertebrate":
         import envs.vertebrate_env as vertebrate_env
+
         env = vertebrate_env.VertebrateEnv()
         env = wrappers.OneHotAction(env)
     elif suite == "mmjc":
         import envs.mmjc_env as mmjc_env
+
         env = mmjc_env.MMJCENV()
     else:
         raise NotImplementedError(suite)
@@ -242,15 +244,15 @@ def main(config):
         directory = config.evaldir
     eval_eps = tools.load_episodes(directory, limit=1)
     make = lambda mode, id: make_env(config, mode, id)
-    
+
     # Create vectorized environments using Tianshou's ShmemVectorEnv
     train_env_fns = [lambda i=i: make("train", i) for i in range(config.envs)]
     eval_env_fns = [lambda i=i: make("eval", i) for i in range(config.envs)]
-    
+
     # train_envs = ShmemVectorEnv(train_env_fns)
     train_envs = SubprocVectorEnv(train_env_fns)
     eval_envs = SubprocVectorEnv(eval_env_fns)
-    
+
     # Get action space from the vectorized environment
     act_space = train_envs.action_space[0]
     obs_space = train_envs.observation_space[0]
@@ -294,7 +296,7 @@ def main(config):
     print("Simulate agent.")
     train_dataset = make_dataset(train_eps, config)
     eval_dataset = make_dataset(eval_eps, config)
-    
+
     # Use observation_space and action_space from the vectorized environment
     agent = Dreamer(
         obs_space,
@@ -344,20 +346,20 @@ def main(config):
             "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
         }
         torch.save(items_to_save, logdir / "latest.pt")
-    for env in train_envs + eval_envs:
-        try:
-            env.close()
-        except Exception:
-            pass
+    try:
+        train_envs.close()
+        eval_envs.close()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--configs", nargs="+")
     args, remaining = parser.parse_known_args()
-    
+
     # Use new ruamel.yaml API
-    yaml_loader = yaml.YAML(typ='safe', pure=True)
+    yaml_loader = yaml.YAML(typ="safe", pure=True)
     with open(pathlib.Path(sys.argv[0]).parent / "configs.yaml") as f:
         configs = yaml_loader.load(f)
 

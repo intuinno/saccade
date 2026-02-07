@@ -7,7 +7,7 @@ class MMJC:
         import gymnasium
         import mmjc_env
 
-        self._env = gymnasium.make(task)
+        self._env = gymnasium.make(task, targets_per_room=10)
         self._size = size
 
     def __getattr__(self, name):

@@ -193,6 +193,11 @@ def make_env(config, mode, id):
 
         env = minecraft.make_env(task, size=config.size, break_speed=config.break_speed)
         env = wrappers.OneHotAction(env)
+    elif suite == "mmjc":
+        import envs.mmjc as mmjc
+
+        env = mmjc.MMJC(task, config.size, seed=config.seed + id)
+        env = wrappers.NormalizeActions(env)
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)

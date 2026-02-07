@@ -198,6 +198,11 @@ def make_env(config, mode, id):
 
         env = mmjc.MMJC(task, config.size, seed=config.seed + id)
         env = wrappers.NormalizeActions(env)
+    elif suite == "mmjcnav":
+        import envs.mmjc as mmjc
+
+        env = mmjc.MMJCNav(task, config.size, seed=config.seed + id)
+        env = wrappers.NormalizeActions(env)
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)

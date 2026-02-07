@@ -3,11 +3,11 @@ import numpy as np
 
 
 class MMJC:
-    def __init__(self, task, size=(64, 64), seed=0):
+    def __init__(self, task, size=(64, 64), seed=0, render_mode=None):
         import gymnasium
         import mmjc_env
 
-        self._env = gymnasium.make(task, targets_per_room=10)
+        self._env = gymnasium.make(task, targets_per_room=1, render_mode=render_mode)
         self._size = size
 
     def __getattr__(self, name):
@@ -57,6 +57,9 @@ class MMJC:
         obs["is_last"] = False
         obs["is_terminal"] = False
         return obs
+
+    def render(self, *args, **kwargs):
+        return self._env.render()
 
     def close(self):
         self._env.close()

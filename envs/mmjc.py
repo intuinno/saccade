@@ -86,7 +86,7 @@ class MMJCNav:
     """
 
     CURRICULUM_STAGES = [
-        {"max_distance": 3},
+        {"max_distance": 2},
         {"max_distance": 5},
         {"max_distance": 8},
         {"max_distance": 11},
@@ -357,7 +357,7 @@ class MMJCNavCont:
     """
 
     CURRICULUM_STAGES = [
-        {"max_distance": 1},
+        {"max_distance": 2},
         {"max_distance": 3},
         {"max_distance": 5},
         {"max_distance": 8},
@@ -581,7 +581,7 @@ class MMJCHierNav:
     with a distance-based curriculum.
     """
 
-    CURRICULUM_STAGES = [{"max_distance": d} for d in range(1, 10)] + [
+    CURRICULUM_STAGES = [{"max_distance": d} for d in range(2, 10)] + [
         {"max_distance": float("inf")},
     ]
     ADVANCE_THRESHOLD = 0.5

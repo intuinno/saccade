@@ -349,6 +349,12 @@ def main(config):
                 video_pred = agent._wm.video_pred(next(eval_dataset))
                 logger.video("eval_openl", to_np(video_pred))
         print("Start training.")
+        # Backup current model before collecting new env steps
+        items_to_save = {
+            "agent_state_dict": agent.state_dict(),
+            "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
+        }
+        torch.save(items_to_save, logdir / f"policy_{agent._step}.pt")
         state = tools.simulate(
             agent,
             train_envs,

@@ -194,17 +194,17 @@ class MMJCNav:
         """Extract walkable floor cell positions in grid coordinates.
 
         The maze_map entity_layer has an outer wall border, so map index
-        (row, col) corresponds to grid coordinate (col-1, row-1).
+        (row, col) corresponds to grid coordinate x = col - 1.  The y-axis
+        is flipped: agent_pos y increases upward while maze_map rows increase
+        downward, giving grid y = rows - 2 - row.
         """
         floor_cells = []
         rows, cols = maze_map.shape
         for r in range(rows):
             for c in range(cols):
                 if maze_map[r, c] in self.WALKABLE_CHARS:
-                    # Convert map (row, col) to grid coords (x, y)
-                    # col-1 → grid x, row-1 → grid y
                     gx = c - 1
-                    gy = r - 1
+                    gy = rows - 2 - r
                     floor_cells.append([float(gx), float(gy)])
         return np.array(floor_cells, dtype=np.float32)
 
@@ -358,7 +358,7 @@ class MMJCHierNav:
     with a distance-based curriculum.
     """
 
-    CURRICULUM_STAGES = [{"max_distance": d} for d in range(1, 10)] + [
+    CURRICULUM_STAGES = [{"max_distance": d} for d in range(2, 10)] + [
         {"max_distance": float("inf")},
     ]
     ADVANCE_THRESHOLD = 0.5
@@ -490,7 +490,7 @@ class MMJCHierNav:
             for c in range(cols):
                 if maze_map[r, c] in self.WALKABLE_CHARS:
                     gx = c - 1
-                    gy = r - 1
+                    gy = rows - 2 - r
                     floor_cells.append([float(gx), float(gy)])
         return np.array(floor_cells, dtype=np.float32)
 

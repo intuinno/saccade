@@ -1,4 +1,5 @@
 import os
+import cv2
 import gym
 import logging
 import numpy as np
@@ -357,11 +358,7 @@ class MMJCHierNav:
     with a distance-based curriculum.
     """
 
-    CURRICULUM_STAGES = [
-        {"max_distance": 3},
-        {"max_distance": 5},
-        {"max_distance": 8},
-        {"max_distance": 11},
+    CURRICULUM_STAGES = [{"max_distance": d} for d in range(1, 10)] + [
         {"max_distance": float("inf")},
     ]
     ADVANCE_THRESHOLD = 0.5
@@ -369,14 +366,19 @@ class MMJCHierNav:
     WALKABLE_CHARS = {'.', 'P', 'G'}
 
     def __init__(self, task, size=(64, 64), seed=0, model_path="",
-                 k_steps=20, hidden_sizes=(256, 256), goal_radius=1.0):
+                 k_steps=20, hidden_sizes=(256, 256), goal_radius=1.0,
+                 render_mode=None):
         import gymnasium
         import mmjc_env
 
+        # Create env with render_mode="human" to get 256x256 camera,
+        # then override to rgb_array so render() returns frames without
+        # opening a pygame window.
         self._env = gymnasium.make(
             task, targets_per_room=1, target_reward=False,
-            global_observables=True,
+            global_observables=True, render_mode="human",
         )
+        self._env.unwrapped.render_mode = render_mode
         self._size = size
         self._seed = seed
         self._rng = np.random.default_rng(seed)
@@ -406,6 +408,9 @@ class MMJCHierNav:
         self._goal_pos = None
         self._last_base_obs = None
         self._last_info = None
+        self._trajectory = []
+        # Optional callback invoked after each low-level step: fn() -> None
+        self.substep_callback = None
 
     def _load_pretrained(self, model_path):
         if not os.path.exists(model_path):
@@ -491,14 +496,17 @@ class MMJCHierNav:
 
     def _select_goal(self, agent_pos, floor_cells):
         max_dist = self.CURRICULUM_STAGES[self._curriculum_stage]["max_distance"]
-        distances = np.linalg.norm(floor_cells - agent_pos, axis=1)
+        # Compare distances using cell centers
+        cell_centers = floor_cells + 0.5
+        distances = np.linalg.norm(cell_centers - agent_pos, axis=1)
         valid_mask = (distances >= 1.0) & (distances <= max_dist)
         valid_indices = np.where(valid_mask)[0]
         if len(valid_indices) == 0:
             valid_mask = distances >= 1.0
             valid_indices = np.where(valid_mask)[0]
         chosen_idx = self._rng.choice(valid_indices)
-        return floor_cells[chosen_idx]
+        # Return cell center, not corner
+        return cell_centers[chosen_idx]
 
     def _maybe_advance_curriculum(self):
         if self._curriculum_stage >= len(self.CURRICULUM_STAGES) - 1:
@@ -521,6 +529,7 @@ class MMJCHierNav:
         self._goal_pos = self._select_goal(agent_pos, floor_cells)
         self._last_base_obs = base_obs
         self._last_info = info
+        self._trajectory = [(agent_pos[0], agent_pos[1])]
         obs = self._build_obs(base_obs, info, True, False, False)
         obs["log_curriculum_stage"] = 0.0
         return obs
@@ -552,8 +561,13 @@ class MMJCHierNav:
             self._last_base_obs = base_obs
             self._last_info = info
 
-            # Check if goal reached
             agent_pos = info["agent_pos"]
+            self._trajectory.append((agent_pos[0], agent_pos[1]))
+
+            if self.substep_callback is not None:
+                self.substep_callback()
+
+            # Check if goal reached
             dist_to_goal = np.linalg.norm(agent_pos - self._goal_pos)
             reached_goal = dist_to_goal < self._goal_radius
 
@@ -583,7 +597,41 @@ class MMJCHierNav:
         return obs, reward, done, info
 
     def render(self, *args, **kwargs):
-        return self._env.render()
+        frame = self._env.render()
+        if frame is None or self._goal_pos is None:
+            return frame
+
+        # Draw goal marker on the maze-map panel (3rd panel).
+        cam_res = self._env.unwrapped.camera_resolution
+        maze_map = self._last_info.get("maze_map") if self._last_info else None
+        if maze_map is None:
+            return frame
+
+        frame = frame.copy()
+        height = maze_map.shape[0]
+        scale = cam_res / height
+        offset_x = 2 * cam_res
+
+        # Draw trajectory as a polyline on the 3rd panel (maze map).
+        if len(self._trajectory) > 1:
+            pts = []
+            for px, py in self._trajectory:
+                ix = int((px + 1) * scale) + offset_x
+                iy = int((height - 1 - py) * scale)
+                pts.append((ix, iy))
+            cv2.polylines(
+                frame, [np.array(pts, dtype=np.int32)],
+                isClosed=False, color=(180, 180, 180), thickness=1,
+            )
+
+        # Draw goal marker (green circle). goal_pos is already at cell center.
+        gx = int((self._goal_pos[0] + 1) * scale)
+        gy = int((height - 1 - self._goal_pos[1]) * scale)
+        radius = max(3, int(scale * 0.45))
+        cv2.circle(frame, (offset_x + gx, gy), radius, (0, 255, 0), -1)
+        cv2.circle(frame, (offset_x + gx, gy), radius, (0, 0, 0), 1)
+
+        return frame
 
     def close(self):
         self._env.close()

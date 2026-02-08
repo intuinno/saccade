@@ -521,7 +521,9 @@ class MMJCHierNav:
         self._goal_pos = self._select_goal(agent_pos, floor_cells)
         self._last_base_obs = base_obs
         self._last_info = info
-        return self._build_obs(base_obs, info, True, False, False)
+        obs = self._build_obs(base_obs, info, True, False, False)
+        obs["log_curriculum_stage"] = 0.0
+        return obs
 
     def step(self, action):
         # Convert discrete action to 4D one-hot goal vector
@@ -574,6 +576,9 @@ class MMJCHierNav:
         obs = self._build_obs(
             self._last_base_obs, self._last_info, False, done, terminated,
         )
+        # log_ keys are summed over the episode by the training loop;
+        # only set on the terminal step so the sum equals the value.
+        obs["log_curriculum_stage"] = float(self._curriculum_stage + 1) if done else 0.0
         info["curriculum_stage"] = self._curriculum_stage + 1
         return obs, reward, done, info
 

@@ -131,6 +131,14 @@ def infer_config_from_checkpoint(state_dict, config):
     return config
 
 
+def count_train_steps(logdir):
+    """Count environment steps from saved episodes (same as dreamer.py)."""
+    traindir = logdir / "train_eps"
+    if not traindir.exists():
+        return 0
+    return sum(int(str(n).split("-")[-1][:-4]) - 1 for n in traindir.glob("*.npz"))
+
+
 def get_model_mtime(path):
     """Get file modification time, or None if not found."""
     try:
@@ -240,7 +248,9 @@ def main():
 
     agent.load_state_dict(state_dict)
     last_mtime = get_model_mtime(model_path)
-    print("Checkpoint loaded!")
+    model_name = logdir.name
+    train_steps = count_train_steps(logdir)
+    print(f"Checkpoint loaded! ({model_name}, {train_steps} steps)")
 
     # ── Compute display dimensions from a probe render ─────────────────
     probe_obs = env.reset()
@@ -313,10 +323,10 @@ def main():
         else:
             stage_label = STAGE_LABELS[hier_env._curriculum_stage + 1]
         hud_lines = [
+            f"{model_name}  Train: {train_steps//1000}k",
             f"Ep {episode_count + 1}  Step {hud_state['step']}",
             f"Reward: {hud_state['reward']:.2f}  ({hud_state['last_r']:+.3f})",
             f"Action: {hud_state['action']}  [{stage_label}]",
-            f"Reloads: {reload_count}  (0=rand, 1-9=dist)",
         ]
         y = 8
         for line in hud_lines:
@@ -394,7 +404,8 @@ def main():
                 if load_weights(agent, model_path, config.device):
                     last_mtime = mtime
                     reload_count += 1
-                    print(f"  Reloaded! (reload #{reload_count})")
+                    train_steps = count_train_steps(logdir)
+                    print(f"  Reloaded! (reload #{reload_count}, {train_steps//1000}k steps)")
                 else:
                     print("  Reload failed, using previous weights")
 

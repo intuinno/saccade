@@ -33,7 +33,12 @@ class WorldModel(nn.Module):
         self._use_amp = True if config.precision == 16 else False
         self._config = config
         shapes = {k: tuple(v.shape) for k, v in obs_space.spaces.items()}
-        self.encoder = networks.MultiEncoder(shapes, **config.encoder)
+        encoder_type = config.encoder.pop("type", "standard")
+        if encoder_type == "separate":
+            self.encoder = networks.SeparateMultiEncoder(shapes, **config.encoder)
+        else:
+            self.encoder = networks.MultiEncoder(shapes, **config.encoder)
+        config.encoder["type"] = encoder_type
         self.embed_size = self.encoder.outdim
         self.dynamics = networks.RSSM(
             config.dyn_stoch,

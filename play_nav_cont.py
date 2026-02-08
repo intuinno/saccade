@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Play a trained DreamerV3 hierarchical navigation model via pygame window.
+"""Play a trained DreamerV3 MMJCNavCont model with live model reloading.
 
 Usage:
-    python play_hier_nav.py --logdir logs/maz-017-rev2 --configs mmjc_hier_nav --device cpu
-    python play_hier_nav.py --logdir logs/maz-017-rev2 --configs mmjc_hier_nav --device cuda:1 --fps 10
+    python play_nav_cont.py --logdir logs/maz-017-rev3 --configs mmjc_nav_sep --device cpu
+    python play_nav_cont.py --logdir logs/maz-017-rev3 --configs mmjc_nav_sep --device cuda:1 --fps 30
 
-The mmjc_env camera renders at 256x256 when render_mode="human" and downscales
-the image observation to 64x64 for the agent. We use render_mode="rgb_array"
-with MUJOCO_GL=osmesa for offscreen rendering and display via pygame.
-
-Supports live model reloading - checks for checkpoint updates after each episode
-and safely reloads the latest weights, even while training is running.
+Keys:
+    0       Switch to random policy
+    1-9     Set curriculum stage max_distance
+    Q/ESC   Quit
 """
 
 import os
@@ -26,7 +24,7 @@ import time
 
 import numpy as np
 import pygame
-import ruamel.yaml as yaml
+from ruamel.yaml import YAML
 import torch
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -36,8 +34,6 @@ import envs.wrappers as wrappers
 import exploration as expl
 import models
 import tools
-
-ACTION_NAMES = ["Forward", "Backward", "CW", "CCW"]
 
 
 class PlayAgent(torch.nn.Module):
@@ -57,7 +53,6 @@ class PlayAgent(torch.nn.Module):
 
     @torch.no_grad()
     def policy(self, obs, state):
-        """Run deterministic policy inference."""
         if state is None:
             latent = action = None
         else:
@@ -139,7 +134,6 @@ def count_steps(folder):
 
 
 def get_model_mtime(path):
-    """Get file modification time, or None if not found."""
     try:
         return os.path.getmtime(path)
     except OSError:
@@ -154,7 +148,6 @@ def format_mtime(mtime):
 
 
 def load_weights(agent, path, device, max_retries=10, retry_delay=5.0):
-    """Load agent weights with retry logic for concurrent training writes."""
     for attempt in range(max_retries):
         try:
             ckpt = torch.load(path, map_location=device, weights_only=False)
@@ -177,18 +170,19 @@ def load_weights(agent, path, device, max_retries=10, retry_delay=5.0):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Play DreamerV3 HierNav with live reload")
+    parser = argparse.ArgumentParser(description="Play DreamerV3 MMJCNavCont")
     parser.add_argument("--logdir", required=True, help="Experiment log directory")
     parser.add_argument("--configs", nargs="+", help="Config sections from configs.yaml")
     parser.add_argument("--device", default="cpu", help="Device (cpu/cuda:0/etc)")
-    parser.add_argument("--fps", type=int, default=40, help="Target FPS for rendering")
+    parser.add_argument("--fps", type=int, default=30, help="Target FPS for rendering")
     parser.add_argument(
         "--display_size", type=int, default=512, help="Display height in pixels"
     )
     args, remaining = parser.parse_known_args()
 
-    # ── Load config (same mechanism as dreamer.py) ──────────────────────
-    configs = yaml.safe_load(
+    # ── Load config ───────────────────────────────────────────────────
+    _yaml = YAML(typ="safe", pure=True)
+    configs = _yaml.load(
         (pathlib.Path(__file__).parent / "configs.yaml").read_text()
     )
 
@@ -215,25 +209,19 @@ def main():
     logdir = pathlib.Path(args.logdir).expanduser()
     model_path = logdir / "latest.pt"
 
-    # ── Create environment ─────────────────────────────────────────────
+    # ── Create environment ────────────────────────────────────────────
     suite, task = config.task.split("_", 1)
-    env = mmjc.MMJCHierNav(
-        task, config.size,
-        model_path=config.model_path,
-        k_steps=config.k_steps,
-        hidden_sizes=config.hidden_sizes,
-        render_mode="rgb_array",
-    )
-    env = wrappers.OneHotAction(env)
+    env = mmjc.MMJCNavCont(task, config.size, seed=config.seed, render_mode="rgb_array")
+    env = wrappers.NormalizeActions(env)
 
     config.num_actions = env.action_space.shape[0]
     config.time_limit //= config.action_repeat
 
     print(f"Task: {config.task}")
-    print(f"Actions: {config.num_actions} ({', '.join(ACTION_NAMES)})")
+    print(f"Actions: {config.num_actions}")
     print(f"Model: {model_path}")
 
-    # ── Infer model architecture from checkpoint ───────────────────────
+    # ── Infer model architecture from checkpoint ──────────────────────
     print("Waiting for checkpoint...")
     while not model_path.exists():
         print(f"  {model_path} not found, waiting...")
@@ -247,7 +235,7 @@ def main():
     }
     config = infer_config_from_checkpoint(state_dict, config)
 
-    # ── Build agent (architecture now matches checkpoint) ──────────────
+    # ── Build agent ───────────────────────────────────────────────────
     agent = PlayAgent(env.observation_space, env.action_space, config).to(config.device)
     agent.requires_grad_(requires_grad=False)
     agent.eval()
@@ -256,7 +244,7 @@ def main():
     last_mtime = get_model_mtime(model_path)
     print("Checkpoint loaded!")
 
-    # ── Compute display dimensions from a probe render ─────────────────
+    # ── Compute display dimensions ────────────────────────────────────
     probe_obs = env.reset()
     probe_frame = env.render()
     frame_h, frame_w = probe_frame.shape[:2]
@@ -264,16 +252,15 @@ def main():
     display_h = args.display_size
     display_w = int(display_h * aspect)
 
-    # ── Initialize pygame ──────────────────────────────────────────────
+    # ── Initialize pygame ─────────────────────────────────────────────
     pygame.init()
     screen = pygame.display.set_mode((display_w, display_h))
-    pygame.display.set_caption("DreamerV3 HierNav Play")
+    pygame.display.set_caption("DreamerV3 NavCont Play")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("monospace", 18)
 
     print(f"Display: {display_w}x{display_h} (from {frame_w}x{frame_h} frame)")
-    print(f"Playing at {args.fps} FPS. Press Q or close window to stop.")
-    print(f"Keys: 0=random, 1-9=curriculum stage (max_dist), Q=quit\n")
+    print(f"Playing at {args.fps} FPS.  0=random  1-9=curriculum  Q=quit\n")
 
     logdir_name = logdir.name
     traindir = logdir / "train_eps"
@@ -282,80 +269,23 @@ def main():
 
     episode_count = 0
     reload_count = 0
+    use_random = False
+    reset_requested = False
     running = True
-    use_random = False  # key 0 toggles random policy
-    reset_requested = False  # set by keyboard handler to restart episode
-    # Mutable state for the HUD (updated each high-level step)
-    hud_state = {"step": 0, "reward": 0.0, "last_r": 0.0, "action": ""}
 
-    CURRICULUM_KEY_MAP = {pygame.K_0: None}  # 0 = random policy
-    for _i in range(1, 10):  # 1-9 = curriculum stages
-        CURRICULUM_KEY_MAP[getattr(pygame, f"K_{_i}")] = _i - 1
+    # Unwrap to get the underlying MMJCNavCont env
+    nav_env = env
+    while hasattr(nav_env, 'env') and not isinstance(nav_env, mmjc.MMJCNavCont):
+        nav_env = nav_env.env
+
     STAGE_LABELS = ["Random"] + [
         f"S{s['max_distance']:.0f}" if s["max_distance"] != float("inf") else "S-inf"
-        for s in mmjc.MMJCHierNav.CURRICULUM_STAGES
+        for s in mmjc.MMJCNavCont.CURRICULUM_STAGES
     ]
-
-    def render_frame():
-        """Render + display one frame. Called every low-level substep."""
-        nonlocal running, use_random, reset_requested, train_steps, model_time_str
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    running = False
-                elif event.key in CURRICULUM_KEY_MAP:
-                    stage = CURRICULUM_KEY_MAP[event.key]
-                    if stage is None:
-                        use_random = True
-                        reset_requested = True
-                        print("  Switched to random policy")
-                    else:
-                        use_random = False
-                        hier_env._curriculum_stage = stage
-                        reset_requested = True
-                        max_d = hier_env.CURRICULUM_STAGES[stage]["max_distance"]
-                        print(f"  Curriculum set to stage {stage + 1} (max_dist={max_d})")
-        if not running:
-            return
-
-        frame = env.render()
-        surf = pygame.surfarray.make_surface(
-            np.transpose(frame, (1, 0, 2))
-        )
-        surf = pygame.transform.scale(surf, (display_w, display_h))
-        screen.blit(surf, (0, 0))
-
-        if use_random:
-            stage_label = STAGE_LABELS[0]
-        else:
-            stage_label = STAGE_LABELS[hier_env._curriculum_stage + 1]
-        hud_lines = [
-            f"{logdir_name}  {train_steps//1000}k steps  @{model_time_str}",
-            f"Ep {episode_count + 1}  Step {hud_state['step']}",
-            f"Reward: {hud_state['reward']:.2f}  ({hud_state['last_r']:+.3f})",
-            f"Action: {hud_state['action']}  [{stage_label}]",
-            f"Reloads: {reload_count}  (0=rand, 1-9=dist)",
-        ]
-        y = 8
-        for line in hud_lines:
-            shadow = font.render(line, True, (0, 0, 0))
-            text = font.render(line, True, (255, 255, 255))
-            screen.blit(shadow, (11, y + 1))
-            screen.blit(text, (10, y))
-            y += 20
-
-        pygame.display.flip()
-        clock.tick(args.fps)
-
-    # Register substep callback so every low-level step is rendered
-    hier_env = env.env  # unwrap OneHotAction to get MMJCHierNav
-    hier_env.substep_callback = render_frame
 
     try:
         while running:
-            # ── Reset episode ───────────────────────────────────────────
+            # ── Reset episode ─────────────────────────────────────────
             obs = env.reset()
             obs = {k: np.array([v]) for k, v in obs.items()}
 
@@ -364,50 +294,88 @@ def main():
             step_count = 0
             done = False
 
-            # ── Episode loop ────────────────────────────────────────────
+            # ── Episode loop ──────────────────────────────────────────
             while not done and running and not reset_requested:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        running = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                            running = False
+                        elif event.key == pygame.K_0:
+                            use_random = not use_random
+                            reset_requested = True
+                            print(f"  Policy: {'random' if use_random else 'agent'}")
+                        elif pygame.K_1 <= event.key <= pygame.K_9:
+                            stage = event.key - pygame.K_1
+                            stage = min(stage, len(nav_env.CURRICULUM_STAGES) - 1)
+                            nav_env._curriculum_stage = stage
+                            use_random = False
+                            reset_requested = True
+                            max_d = nav_env.CURRICULUM_STAGES[stage]["max_distance"]
+                            print(f"  Curriculum -> stage {stage + 1} (max_dist={max_d})")
+
+                if not running:
+                    break
+
                 if use_random:
-                    # Random one-hot action
-                    action_idx = np.random.randint(config.num_actions)
-                    act_np = np.zeros(config.num_actions, dtype=np.float32)
-                    act_np[action_idx] = 1.0
+                    act_np = env.action_space.sample()
                 else:
-                    # Agent action (one-hot discrete)
                     action, state = agent.policy(obs, state)
                     act_np = action[0].cpu().numpy()
-                    action_idx = np.argmax(act_np)
-                action_name = ACTION_NAMES[action_idx] if action_idx < len(ACTION_NAMES) else "?"
 
-                # Update HUD state before stepping (substep callback reads this)
-                hud_state["step"] = step_count + 1
-                hud_state["reward"] = total_reward
-                hud_state["action"] = action_name
-
-                # Step environment (substep_callback renders each low-level step)
                 obs, reward, done, info = env.step(act_np)
                 total_reward += reward
-                hud_state["reward"] = total_reward
-                hud_state["last_r"] = reward
                 step_count += 1
 
-                # Add batch dimension for agent
                 obs = {k: np.array([v]) for k, v in obs.items()}
 
-            # ── End of episode ──────────────────────────────────────────
+                # ── Render frame ──────────────────────────────────────
+                frame = env.render()
+                if frame is not None:
+                    surf = pygame.surfarray.make_surface(
+                        np.transpose(frame, (1, 0, 2))
+                    )
+                    surf = pygame.transform.scale(surf, (display_w, display_h))
+                    screen.blit(surf, (0, 0))
+
+                if use_random:
+                    stage_label = STAGE_LABELS[0]
+                else:
+                    stage_label = STAGE_LABELS[nav_env._curriculum_stage + 1]
+                hud_lines = [
+                    f"{logdir_name}  {train_steps//1000}k steps  @{model_time_str}",
+                    f"Ep {episode_count + 1}  Step {step_count}",
+                    f"Reward: {total_reward:.2f}  ({reward:+.3f})",
+                    f"[{stage_label}]  Reloads: {reload_count}",
+                    f"Policy: {'RANDOM' if use_random else 'agent'}",
+                ]
+                y = 8
+                for line in hud_lines:
+                    shadow = font.render(line, True, (0, 0, 0))
+                    text = font.render(line, True, (255, 255, 255))
+                    screen.blit(shadow, (11, y + 1))
+                    screen.blit(text, (10, y))
+                    y += 20
+
+                pygame.display.flip()
+                clock.tick(args.fps)
+
+            # ── End of episode ────────────────────────────────────────
             if not running:
                 break
 
             if reset_requested:
                 reset_requested = False
-                state = None  # clear agent state for fresh episode
+                state = None
                 continue
 
             episode_count += 1
             print(
                 f"Ep {episode_count}: reward={total_reward:.2f}  steps={step_count}"
+                f"  curriculum={info.get('curriculum_stage', '?')}"
             )
 
-            # Check for model update
             mtime = get_model_mtime(model_path)
             if mtime is not None and mtime != last_mtime:
                 print("  Model updated, reloading...")

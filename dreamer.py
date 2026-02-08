@@ -203,6 +203,11 @@ def make_env(config, mode, id):
 
         env = mmjc.MMJCNav(task, config.size, seed=config.seed + id)
         env = wrappers.NormalizeActions(env)
+    elif suite == "mmjcnavcont":
+        import envs.mmjc as mmjc
+
+        env = mmjc.MMJCNavCont(task, config.size, seed=config.seed + id)
+        env = wrappers.NormalizeActions(env)
     elif suite == "mmjchiernav":
         import envs.mmjc as mmjc
 
@@ -317,6 +322,13 @@ def main(config):
         agent.load_state_dict(checkpoint["agent_state_dict"])
         tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
         agent._should_pretrain._once = False
+
+    # Save initial policy so play scripts can start immediately
+    items_to_save = {
+        "agent_state_dict": agent.state_dict(),
+        "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
+    }
+    torch.save(items_to_save, logdir / "latest.pt")
 
     # make sure eval will be executed once after config.steps
     while agent._step < config.steps + config.eval_every:

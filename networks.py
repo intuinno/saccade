@@ -357,6 +357,89 @@ class MultiEncoder(nn.Module):
         return outputs
 
 
+class SeparateMultiEncoder(nn.Module):
+    def __init__(
+        self,
+        shapes,
+        mlp_keys,
+        cnn_keys,
+        act,
+        norm,
+        cnn_depth,
+        kernel_size,
+        minres,
+        mlp_layers,
+        mlp_units,
+        symlog_inputs,
+    ):
+        super(SeparateMultiEncoder, self).__init__()
+        excluded = ("is_first", "is_last", "is_terminal", "reward")
+        shapes = {
+            k: v
+            for k, v in shapes.items()
+            if k not in excluded and not k.startswith("log_")
+        }
+        self.cnn_shapes = {
+            k: v for k, v in shapes.items() if len(v) == 3 and re.match(cnn_keys, k)
+        }
+        self.mlp_shapes = {
+            k: v
+            for k, v in shapes.items()
+            if len(v) in (1, 2) and re.match(mlp_keys, k)
+        }
+        print("SeparateEncoder CNN shapes:", self.cnn_shapes)
+        print("SeparateEncoder MLP shapes:", self.mlp_shapes)
+
+        self.outdim = 0
+        if self.cnn_shapes:
+            input_ch = sum([v[-1] for v in self.cnn_shapes.values()])
+            input_shape = tuple(self.cnn_shapes.values())[0][:2] + (input_ch,)
+            self._cnn = ConvEncoder(
+                input_shape, cnn_depth, act, norm, kernel_size, minres
+            )
+            self.outdim += self._cnn.outdim
+        if self.mlp_shapes:
+            self._per_key_mlps = nn.ModuleDict()
+            for key, shape in self.mlp_shapes.items():
+                input_size = sum(shape)
+                self._per_key_mlps[key] = MLP(
+                    input_size,
+                    None,
+                    mlp_layers,
+                    mlp_units,
+                    act,
+                    norm,
+                    symlog_inputs=symlog_inputs,
+                    name=f"Encoder_{key}",
+                )
+            concat_input_size = mlp_units * len(self.mlp_shapes)
+            self._concat_mlp = MLP(
+                concat_input_size,
+                None,
+                mlp_layers,
+                mlp_units,
+                act,
+                norm,
+                symlog_inputs=False,
+                name="Encoder_concat",
+            )
+            self.outdim += mlp_units
+
+    def forward(self, obs):
+        outputs = []
+        if self.cnn_shapes:
+            inputs = torch.cat([obs[k] for k in self.cnn_shapes], -1)
+            outputs.append(self._cnn(inputs))
+        if self.mlp_shapes:
+            embeddings = []
+            for key in self.mlp_shapes:
+                embeddings.append(self._per_key_mlps[key](obs[key]))
+            concat_embed = torch.cat(embeddings, -1)
+            outputs.append(self._concat_mlp(concat_embed))
+        outputs = torch.cat(outputs, -1)
+        return outputs
+
+
 class MultiDecoder(nn.Module):
     def __init__(
         self,

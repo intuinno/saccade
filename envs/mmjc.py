@@ -94,7 +94,7 @@ class MMJCNav:
     ]
     ADVANCE_THRESHOLD = 0.5
     HISTORY_LENGTH = 100
-    WALKABLE_CHARS = {'.', 'P', 'G'}
+    WALKABLE_CHARS = {' ', 'P', 'G'}
 
     def __init__(self, task, size=(64, 64), seed=0, render_mode=None,
                  n_heading_bins=8, goal_radius=1.0):
@@ -191,20 +191,20 @@ class MMJCNav:
         return obs
 
     def _get_floor_cells(self, maze_map):
-        """Extract walkable floor cell positions in grid coordinates.
+        """Extract walkable floor cell positions in agent_pos coordinates.
 
-        The maze_map entity_layer has an outer wall border, so map index
-        (row, col) corresponds to grid coordinate (col-1, row-1).
+        The maze_map entity_layer has an outer wall border.  X maps
+        directly (col-1), but Y must be flipped because entity_layer
+        rows increase top-to-bottom while agent_pos[1] increases
+        bottom-to-top (MuJoCo Y-up convention).
         """
         floor_cells = []
         rows, cols = maze_map.shape
         for r in range(rows):
             for c in range(cols):
                 if maze_map[r, c] in self.WALKABLE_CHARS:
-                    # Convert map (row, col) to grid coords (x, y)
-                    # col-1 → grid x, row-1 → grid y
                     gx = c - 1
-                    gy = r - 1
+                    gy = (rows - 2) - r  # flip Y to match agent_pos
                     floor_cells.append([float(gx), float(gy)])
         return np.array(floor_cells, dtype=np.float32)
 
@@ -348,6 +348,229 @@ class _TaxiActor(nn.Module):
         return self.mu(features)
 
 
+class MMJCNavCont:
+    """Navigation wrapper with continuous observations, sparse reward, and curriculum.
+
+    Like MMJCNav (non-hierarchical, direct continuous motor actions) but with
+    continuous observations like MMJCHierNav: normalised position, target,
+    heading, and raw proprioceptors.  Curriculum starts at max_distance 1.
+    """
+
+    CURRICULUM_STAGES = [
+        {"max_distance": 1},
+        {"max_distance": 3},
+        {"max_distance": 5},
+        {"max_distance": 8},
+        {"max_distance": 11},
+        {"max_distance": float("inf")},
+    ]
+    ADVANCE_THRESHOLD = 0.5
+    HISTORY_LENGTH = 100
+    WALKABLE_CHARS = {' ', 'P', 'G'}
+
+    def __init__(self, task, size=(64, 64), seed=0, render_mode=None,
+                 goal_radius=1.0):
+        import gymnasium
+        import mmjc_env
+
+        # Create env with render_mode="human" to get 256x256 camera,
+        # then override to rgb_array so render() returns frames without
+        # opening a pygame window.
+        self._env = gymnasium.make(
+            task, targets_per_room=1, target_reward=False,
+            global_observables=True, render_mode="human",
+        )
+        self._env.unwrapped.render_mode = render_mode
+        self._size = size
+        self._seed = seed
+        self._rng = np.random.default_rng(seed)
+
+        self._maze_size = int(task.split("-")[-1])
+        self._goal_radius = goal_radius
+
+        self._sensor_dim = self._env.observation_space["sensors"].shape[0]
+
+        # Curriculum state
+        self._curriculum_stage = 0
+        self._episode_outcomes = deque(maxlen=self.HISTORY_LENGTH)
+
+        self._goal_pos = None
+        self._last_info = None
+        self._trajectory = []
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        try:
+            return getattr(self._env, name)
+        except AttributeError:
+            raise ValueError(name)
+
+    @property
+    def observation_space(self):
+        spaces = {}
+        spaces["image"] = gym.spaces.Box(0, 255, (64, 64, 3), dtype=np.uint8)
+        spaces["current_position"] = gym.spaces.Box(-1, 1, (2,), dtype=np.float32)
+        spaces["target_position"] = gym.spaces.Box(-1, 1, (2,), dtype=np.float32)
+        spaces["heading"] = gym.spaces.Box(-1, 1, (2,), dtype=np.float32)
+        spaces["proprioceptors"] = gym.spaces.Box(
+            -np.inf, np.inf, (self._sensor_dim,), dtype=np.float64
+        )
+        spaces["is_first"] = gym.spaces.Box(0, 1, (), dtype=bool)
+        spaces["is_last"] = gym.spaces.Box(0, 1, (), dtype=bool)
+        spaces["is_terminal"] = gym.spaces.Box(0, 1, (), dtype=bool)
+        return gym.spaces.Dict(spaces)
+
+    @property
+    def action_space(self):
+        space = self._env.action_space
+        return gym.spaces.Box(
+            low=space.low, high=space.high, shape=space.shape, dtype=np.float32,
+        )
+
+    def _normalize_pos(self, pos):
+        """Map grid position [0, maze_size-1] -> [-1, 1]."""
+        return (np.asarray(pos, dtype=np.float32) / (self._maze_size - 1)) * 2 - 1
+
+    def _build_obs(self, base_obs, info, is_first, is_last, is_terminal):
+        agent_pos = info["agent_pos"]
+        agent_dir = info["agent_dir"]
+        norm = np.linalg.norm(agent_dir)
+        heading = (agent_dir / norm).astype(np.float32) if norm > 0 else np.zeros(2, dtype=np.float32)
+        return {
+            "image": base_obs["image"],
+            "current_position": self._normalize_pos(agent_pos),
+            "target_position": self._normalize_pos(self._goal_pos),
+            "heading": heading,
+            "proprioceptors": base_obs["sensors"],
+            "is_first": is_first,
+            "is_last": is_last,
+            "is_terminal": is_terminal,
+        }
+
+    def _get_floor_cells(self, maze_map):
+        floor_cells = []
+        rows, cols = maze_map.shape
+        for r in range(rows):
+            for c in range(cols):
+                if maze_map[r, c] in self.WALKABLE_CHARS:
+                    gx = c - 1
+                    gy = (rows - 2) - r  # flip Y to match agent_pos
+                    floor_cells.append([float(gx), float(gy)])
+        return np.array(floor_cells, dtype=np.float32)
+
+    def _select_goal(self, agent_pos, floor_cells):
+        max_dist = self.CURRICULUM_STAGES[self._curriculum_stage]["max_distance"]
+        # Compare distances using cell centers
+        cell_centers = floor_cells + 0.5
+        distances = np.linalg.norm(cell_centers - agent_pos, axis=1)
+        valid_mask = (distances >= 1.0) & (distances <= max_dist)
+        valid_indices = np.where(valid_mask)[0]
+        if len(valid_indices) == 0:
+            valid_mask = distances >= 1.0
+            valid_indices = np.where(valid_mask)[0]
+        chosen_idx = self._rng.choice(valid_indices)
+        # Return cell center, not corner
+        return cell_centers[chosen_idx]
+
+    def _maybe_advance_curriculum(self):
+        if self._curriculum_stage >= len(self.CURRICULUM_STAGES) - 1:
+            return
+        if len(self._episode_outcomes) < self.HISTORY_LENGTH:
+            return
+        success_rate = np.mean(self._episode_outcomes)
+        if success_rate > self.ADVANCE_THRESHOLD:
+            self._curriculum_stage += 1
+            logger.info(
+                f"Curriculum advanced to stage {self._curriculum_stage + 1} "
+                f"(max_dist={self.CURRICULUM_STAGES[self._curriculum_stage]['max_distance']})"
+            )
+
+    def reset(self):
+        base_obs, info = self._env.reset()
+        agent_pos = info["agent_pos"]
+        maze_map = info["maze_map"]
+        floor_cells = self._get_floor_cells(maze_map)
+        self._goal_pos = self._select_goal(agent_pos, floor_cells)
+        self._last_info = info
+        self._trajectory = [(agent_pos[0], agent_pos[1])]
+        obs = self._build_obs(base_obs, info, True, False, False)
+        obs["log_curriculum_stage"] = 0.0
+        return obs
+
+    def step(self, action):
+        base_obs, _, base_terminated, base_truncated, info = self._env.step(action)
+
+        agent_pos = info["agent_pos"]
+        self._last_info = info
+        self._trajectory.append((agent_pos[0], agent_pos[1]))
+        dist_to_goal = np.linalg.norm(agent_pos - self._goal_pos)
+        reached_goal = dist_to_goal < self._goal_radius
+
+        if reached_goal:
+            reward = 1.0
+            terminated = True
+            truncated = False
+        elif base_terminated or base_truncated:
+            reward = 0.0
+            terminated = False
+            truncated = True
+        else:
+            reward = 0.0
+            terminated = False
+            truncated = False
+
+        done = terminated or truncated
+
+        if done:
+            self._episode_outcomes.append(reached_goal)
+            self._maybe_advance_curriculum()
+
+        obs = self._build_obs(base_obs, info, False, done, terminated)
+        obs["log_curriculum_stage"] = float(self._curriculum_stage + 1) if done else 0.0
+        info["curriculum_stage"] = self._curriculum_stage + 1
+        return obs, reward, done, info
+
+    def render(self, *args, **kwargs):
+        frame = self._env.render()
+        if frame is None or self._goal_pos is None:
+            return frame
+
+        cam_res = self._env.unwrapped.camera_resolution
+        maze_map = self._last_info.get("maze_map") if self._last_info else None
+        if maze_map is None:
+            return frame
+
+        frame = frame.copy()
+        height = maze_map.shape[0]
+        scale = cam_res / height
+        offset_x = 2 * cam_res
+
+        # Draw trajectory as a polyline on the 3rd panel (maze map).
+        if len(self._trajectory) > 1:
+            pts = []
+            for px, py in self._trajectory:
+                ix = int((px + 1) * scale) + offset_x
+                iy = int((height - 1 - py) * scale)
+                pts.append((ix, iy))
+            cv2.polylines(
+                frame, [np.array(pts, dtype=np.int32)],
+                isClosed=False, color=(180, 180, 180), thickness=1,
+            )
+
+        # Draw goal marker (green circle).
+        gx = int((self._goal_pos[0] + 1) * scale)
+        gy = int((height - 1 - self._goal_pos[1]) * scale)
+        radius = max(3, int(scale * 0.45))
+        cv2.circle(frame, (offset_x + gx, gy), radius, (0, 255, 0), -1)
+        cv2.circle(frame, (offset_x + gx, gy), radius, (0, 0, 0), 1)
+
+        return frame
+
+    def close(self):
+        self._env.close()
+
+
 class MMJCHierNav:
     """Hierarchical navigation wrapper with continuous observations.
 
@@ -363,7 +586,7 @@ class MMJCHierNav:
     ]
     ADVANCE_THRESHOLD = 0.5
     HISTORY_LENGTH = 100
-    WALKABLE_CHARS = {'.', 'P', 'G'}
+    WALKABLE_CHARS = {' ', 'P', 'G'}
 
     def __init__(self, task, size=(64, 64), seed=0, model_path="",
                  k_steps=20, hidden_sizes=(256, 256), goal_radius=1.0,
@@ -490,7 +713,7 @@ class MMJCHierNav:
             for c in range(cols):
                 if maze_map[r, c] in self.WALKABLE_CHARS:
                     gx = c - 1
-                    gy = r - 1
+                    gy = (rows - 2) - r  # flip Y to match agent_pos
                     floor_cells.append([float(gx), float(gy)])
         return np.array(floor_cells, dtype=np.float32)
 

@@ -360,6 +360,61 @@ mmjc_nav:
       outscale: 1.0,
     }
 
+mmjc_hier_nav:
+  task: "mmjchiernav_mmjc-13"
+  model_path: "~/codegit/cog_arch/models/taxis_policy_maz-010-rev16.pth"
+  k_steps: 20
+  hidden_sizes: [256, 256]
+  steps: 1e8
+  action_repeat: 1
+  envs: 1
+  parallel: False
+  train_ratio: 512
+  video_pred_log: true
+  time_limit: 750
+  imag_gradient: "reinforce"
+  batch_size: 8
+  encoder:
+    {
+      mlp_keys: "current_position|target_position|heading",
+      cnn_keys: "image",
+      act: "SiLU",
+      norm: True,
+      cnn_depth: 32,
+      kernel_size: 4,
+      minres: 4,
+      mlp_layers: 5,
+      mlp_units: 1024,
+      symlog_inputs: True,
+    }
+  decoder:
+    {
+      mlp_keys: "current_position|target_position|heading",
+      cnn_keys: "image",
+      act: "SiLU",
+      norm: True,
+      cnn_depth: 32,
+      kernel_size: 4,
+      minres: 4,
+      mlp_layers: 5,
+      mlp_units: 1024,
+      cnn_sigmoid: False,
+      image_dist: mse,
+      vector_dist: symlog_mse,
+      outscale: 1.0,
+    }
+  actor:
+    {
+      dist: "onehot",
+      std: "none",
+      entropy: 1e-3,
+      unimix_ratio: 0.01,
+      lr: 3e-5,
+      eps: 1e-5,
+      grad_clip: 100.0,
+      outscale: 1.0,
+    }
+
 debug:
   debug: True
   pretrain: 1

@@ -203,6 +203,16 @@ def make_env(config, mode, id):
 
         env = mmjc.MMJCNav(task, config.size, seed=config.seed + id)
         env = wrappers.NormalizeActions(env)
+    elif suite == "mmjchiernav":
+        import envs.mmjc as mmjc
+
+        env = mmjc.MMJCHierNav(
+            task, config.size, seed=config.seed + id,
+            model_path=config.model_path,
+            k_steps=config.k_steps,
+            hidden_sizes=config.hidden_sizes,
+        )
+        env = wrappers.OneHotAction(env)
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)

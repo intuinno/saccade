@@ -54,6 +54,8 @@ class MMJC:
     def step(self, action):
         obs, reward, terminated, truncated, info = self._env.step(action)
         done = terminated or truncated
+        if truncated and not terminated:
+            info["discount"] = np.array(1.0, dtype=np.float32)
         obs["is_first"] = False
         obs["is_last"] = done
         obs["is_terminal"] = terminated
@@ -97,7 +99,7 @@ class MMJCNav:
     WALKABLE_CHARS = {' ', 'P', 'G'}
 
     def __init__(self, task, size=(64, 64), seed=0, render_mode=None,
-                 n_heading_bins=8, goal_radius=1.0):
+                 n_heading_bins=8, goal_radius=0.5):
         import gymnasium
         import mmjc_env
 
@@ -260,6 +262,7 @@ class MMJCNav:
             reward = 0.0
             terminated = False
             truncated = True
+            info["discount"] = np.array(1.0, dtype=np.float32)
         else:
             reward = 0.0
             terminated = False
@@ -370,7 +373,7 @@ class MMJCNavCont:
     WALKABLE_CHARS = {' ', 'P', 'G'}
 
     def __init__(self, task, size=(64, 64), seed=0, render_mode=None,
-                 goal_radius=1.0):
+                 goal_radius=0.5):
         import gymnasium
         import mmjc_env
 
@@ -505,6 +508,7 @@ class MMJCNavCont:
             reward = 0.0
             terminated = False
             truncated = True
+            info["discount"] = np.array(1.0, dtype=np.float32)
         else:
             reward = 0.0
             terminated = False
@@ -575,7 +579,7 @@ class MMJCHierNav:
     WALKABLE_CHARS = {' ', 'P', 'G'}
 
     def __init__(self, task, size=(64, 64), seed=0, model_path="",
-                 k_steps=20, hidden_sizes=(256, 256), goal_radius=1.0,
+                 k_steps=20, hidden_sizes=(256, 256), goal_radius=0.5,
                  render_mode=None):
         import gymnasium
         import mmjc_env
@@ -783,6 +787,8 @@ class MMJCHierNav:
             if base_term or base_trunc or reached_goal:
                 terminated = base_term or reached_goal
                 truncated = base_trunc and not reached_goal
+                if truncated:
+                    info["discount"] = np.array(1.0, dtype=np.float32)
                 break
 
         if reached_goal:

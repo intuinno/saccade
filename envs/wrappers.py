@@ -14,10 +14,29 @@ class TimeLimit(gym.Wrapper):
         assert self._step is not None, "Must reset environment."
         obs, reward, done, info = self.env.step(action)
         self._step += 1
-        if self._step >= self._duration:
+        # Initialize log keys to 0 (summed over episode; only set on final step)
+        obs["log_time_limit"] = 0.0
+        obs["log_episode_steps"] = 0.0
+        if done:
+            # Inner env ended the episode — pass through its signals unchanged
+            obs["log_time_limit"] = float(self._duration)
+            obs["log_episode_steps"] = float(self._step)
+            self._step = None
+        elif self._step >= self._duration:
+            # Time limit reached, inner env hasn't ended — this is a truncation
             done = True
+            obs["is_last"] = True
+            obs["log_time_limit"] = float(self._duration)
+            obs["log_episode_steps"] = float(self._step)
             if "discount" not in info:
                 info["discount"] = np.array(1.0).astype(np.float32)
+            # Propagate episode-end log values: for any log_X obs key still at 0,
+            # fill from info[X] if available
+            for key in list(obs.keys()):
+                if key.startswith("log_") and float(obs[key]) == 0.0:
+                    info_key = key[len("log_"):]
+                    if info_key in info:
+                        obs[key] = float(info[info_key])
             self._step = None
         return obs, reward, done, info
 

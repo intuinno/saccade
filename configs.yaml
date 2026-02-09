@@ -370,7 +370,7 @@ mmjc_nav_sep:
   train_ratio: 512
   video_pred_log: true
   time_limit: 750
-  imag_gradient: "reinforce"
+  imag_gradient: "dynamics"
   batch_size: 8
   encoder:
     {

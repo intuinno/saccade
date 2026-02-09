@@ -357,6 +357,7 @@ class MMJCNavCont:
     """
 
     CURRICULUM_STAGES = [
+        {"max_distance": 1},
         {"max_distance": 2},
         {"max_distance": 3},
         {"max_distance": 5},
@@ -392,7 +393,6 @@ class MMJCNavCont:
 
         # Curriculum state
         self._curriculum_stage = 0
-        self._episode_outcomes = deque(maxlen=self.HISTORY_LENGTH)
 
         self._goal_pos = None
         self._last_info = None
@@ -405,6 +405,9 @@ class MMJCNavCont:
             return getattr(self._env, name)
         except AttributeError:
             raise ValueError(name)
+
+    def set_curriculum_stage(self, stage):
+        self._curriculum_stage = max(0, min(stage, len(self.CURRICULUM_STAGES) - 1))
 
     @property
     def observation_space(self):
@@ -473,19 +476,6 @@ class MMJCNavCont:
         # Return cell center, not corner
         return cell_centers[chosen_idx]
 
-    def _maybe_advance_curriculum(self):
-        if self._curriculum_stage >= len(self.CURRICULUM_STAGES) - 1:
-            return
-        if len(self._episode_outcomes) < self.HISTORY_LENGTH:
-            return
-        success_rate = np.mean(self._episode_outcomes)
-        if success_rate > self.ADVANCE_THRESHOLD:
-            self._curriculum_stage += 1
-            logger.info(
-                f"Curriculum advanced to stage {self._curriculum_stage + 1} "
-                f"(max_dist={self.CURRICULUM_STAGES[self._curriculum_stage]['max_distance']})"
-            )
-
     def reset(self):
         base_obs, info = self._env.reset()
         agent_pos = info["agent_pos"]
@@ -521,10 +511,6 @@ class MMJCNavCont:
             truncated = False
 
         done = terminated or truncated
-
-        if done:
-            self._episode_outcomes.append(reached_goal)
-            self._maybe_advance_curriculum()
 
         obs = self._build_obs(base_obs, info, False, done, terminated)
         obs["log_curriculum_stage"] = float(self._curriculum_stage + 1) if done else 0.0
@@ -581,7 +567,7 @@ class MMJCHierNav:
     with a distance-based curriculum.
     """
 
-    CURRICULUM_STAGES = [{"max_distance": d} for d in range(2, 10)] + [
+    CURRICULUM_STAGES = [{"max_distance": d} for d in range(1, 10)] + [
         {"max_distance": float("inf")},
     ]
     ADVANCE_THRESHOLD = 0.5

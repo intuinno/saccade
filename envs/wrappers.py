@@ -21,6 +21,9 @@ class TimeLimit(gym.Wrapper):
             self._step = None
         return obs, reward, done, info
 
+    def set_duration(self, duration):
+        self._duration = duration
+
     def reset(self):
         self._step = 0
         return self.env.reset()

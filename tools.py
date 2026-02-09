@@ -136,6 +136,7 @@ def simulate(
     steps=0,
     episodes=0,
     state=None,
+    on_episode_done=None,
 ):
     # initialize or unpack simulation state
     if state is None:
@@ -207,13 +208,17 @@ def simulate(
                 score = float(np.array(cache[envs[i].id]["reward"]).sum())
                 video = cache[envs[i].id]["image"]
                 # record logs given from environments
+                prefix = "eval_" if is_eval else "train_"
                 for key in list(cache[envs[i].id].keys()):
                     if "log_" in key:
                         logger.scalar(
-                            key, float(np.array(cache[envs[i].id][key]).sum())
+                            prefix + key, float(np.array(cache[envs[i].id][key]).sum())
                         )
                         # log items won't be used later
                         cache[envs[i].id].pop(key)
+
+                if on_episode_done is not None:
+                    on_episode_done(i, score)
 
                 if not is_eval:
                     step_in_dataset = erase_over_episodes(cache, limit)

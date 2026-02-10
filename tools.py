@@ -218,7 +218,9 @@ def simulate(
                         cache[envs[i].id].pop(key)
 
                 if on_episode_done is not None:
-                    on_episode_done(i, score)
+                    ep_info = results[i][3] if len(results[i]) > 3 else {}
+                    ep_info["episode_steps"] = length
+                    on_episode_done(i, score, ep_info)
 
                 if not is_eval:
                     step_in_dataset = erase_over_episodes(cache, limit)

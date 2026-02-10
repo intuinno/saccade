@@ -314,9 +314,14 @@ def main():
                     else:
                         use_random = False
                         hier_env._curriculum_stage = stage
-                        reset_requested = True
                         max_d = hier_env.CURRICULUM_STAGES[stage]["max_distance"]
-                        print(f"  Curriculum set to stage {stage + 1} (max_dist={max_d})")
+                        if max_d == float("inf"):
+                            tl = config.time_limit
+                        else:
+                            tl = min(int(10 * max_d), config.time_limit)
+                        hier_env.set_inner_time_limit(tl)
+                        reset_requested = True
+                        print(f"  Curriculum set to stage {stage + 1} (max_dist={max_d}, time_limit={tl})")
         if not running:
             return
 

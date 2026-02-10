@@ -310,10 +310,15 @@ def main():
                             stage = event.key - pygame.K_1
                             stage = min(stage, len(nav_env.CURRICULUM_STAGES) - 1)
                             nav_env._curriculum_stage = stage
+                            max_d = nav_env.CURRICULUM_STAGES[stage]["max_distance"]
+                            if max_d == float("inf"):
+                                tl = config.time_limit
+                            else:
+                                tl = min(int(10 * max_d), config.time_limit)
+                            nav_env.set_inner_time_limit(tl)
                             use_random = False
                             reset_requested = True
-                            max_d = nav_env.CURRICULUM_STAGES[stage]["max_distance"]
-                            print(f"  Curriculum -> stage {stage + 1} (max_dist={max_d})")
+                            print(f"  Curriculum -> stage {stage + 1} (max_dist={max_d}, time_limit={tl})")
 
                 if not running:
                     break

@@ -3,6 +3,7 @@ defaults:
   traindir: null
   evaldir: null
   offline_traindir: ""
+  curriculum_stage: -1
   offline_evaldir: ""
   seed: 0
   deterministic_run: False
@@ -429,10 +430,11 @@ mmjc_hier_nav:
   train_ratio: 512
   video_pred_log: true
   time_limit: 750
-  imag_gradient: "reinforce"
+  imag_gradient: "dynamics"
   batch_size: 8
   encoder:
     {
+      type: "separate",
       mlp_keys: "current_position|target_position|heading",
       cnn_keys: "image",
       act: "SiLU",

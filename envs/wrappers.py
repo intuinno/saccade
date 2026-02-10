@@ -7,7 +7,8 @@ import uuid
 class TimeLimit(gym.Wrapper):
     def __init__(self, env, duration):
         super().__init__(env)
-        self._duration = duration
+        self._duration = int(1e8)
+        self._inner_time_limit = duration
         self._step = None
 
     def step(self, action):
@@ -19,14 +20,14 @@ class TimeLimit(gym.Wrapper):
         obs["log_episode_steps"] = 0.0
         if done:
             # Inner env ended the episode — pass through its signals unchanged
-            obs["log_time_limit"] = float(self._duration)
+            obs["log_time_limit"] = float(self._inner_time_limit)
             obs["log_episode_steps"] = float(self._step)
             self._step = None
         elif self._step >= self._duration:
-            # Time limit reached, inner env hasn't ended — this is a truncation
+            # Safety cap reached, inner env hasn't ended — this is a truncation
             done = True
             obs["is_last"] = True
-            obs["log_time_limit"] = float(self._duration)
+            obs["log_time_limit"] = float(self._inner_time_limit)
             obs["log_episode_steps"] = float(self._step)
             if "discount" not in info:
                 info["discount"] = np.array(1.0).astype(np.float32)
@@ -40,8 +41,11 @@ class TimeLimit(gym.Wrapper):
             self._step = None
         return obs, reward, done, info
 
-    def set_duration(self, duration):
-        self._duration = duration
+    def set_inner_time_limit(self, time_limit):
+        self._inner_time_limit = time_limit
+        # Forward to inner env (e.g. MMJCNavCont) to set dm_control time limit
+        if hasattr(self.env, 'set_inner_time_limit'):
+            self.env.set_inner_time_limit(time_limit)
 
     def reset(self):
         self._step = 0

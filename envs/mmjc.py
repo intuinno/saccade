@@ -699,7 +699,7 @@ class MMJCHierNav:
     with a distance-based curriculum.
     """
 
-    CURRICULUM_STAGES = [{"max_distance": d} for d in range(2, 10)] + [
+    CURRICULUM_STAGES = [{"max_distance": d} for d in range(1, 10)] + [
         {"max_distance": float("inf")},
     ]
     ADVANCE_THRESHOLD = 0.5

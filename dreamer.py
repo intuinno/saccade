@@ -476,13 +476,6 @@ def main(config):
         items_to_save["curriculum"] = curriculum.state_dict()
     torch.save(items_to_save, logdir / "latest.pt")
 
-    # Save initial policy so play scripts can start immediately
-    items_to_save = {
-        "agent_state_dict": agent.state_dict(),
-        "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
-    }
-    torch.save(items_to_save, logdir / "latest.pt")
-
     # make sure eval will be executed once after config.steps
     while agent._step < config.steps + config.eval_every:
         logger.write()

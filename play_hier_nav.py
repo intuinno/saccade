@@ -254,9 +254,7 @@ def main():
 
     agent.load_state_dict(state_dict)
     last_mtime = get_model_mtime(model_path)
-    model_name = logdir.name
-    train_steps = count_train_steps(logdir)
-    print(f"Checkpoint loaded! ({model_name}, {train_steps} steps)")
+    print("Checkpoint loaded!")
 
     # ── Compute display dimensions from a probe render ─────────────────
     probe_obs = env.reset()
@@ -343,6 +341,7 @@ def main():
             f"Ep {episode_count + 1}  Step {hud_state['step']}",
             f"Reward: {hud_state['reward']:.2f}  ({hud_state['last_r']:+.3f})",
             f"Action: {hud_state['action']}  [{stage_label}]",
+            f"Reloads: {reload_count}  (0=rand, 1-9=dist)",
         ]
         y = 8
         for line in hud_lines:

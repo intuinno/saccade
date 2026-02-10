@@ -421,7 +421,7 @@ mmjc_nav_sep:
 mmjc_hier_nav:
   task: "mmjchiernav_mmjc-13"
   model_path: "~/codegit/cog_arch/models/taxis_policy_maz-010-rev16.pth"
-  k_steps: 20
+  k_steps: 10
   hidden_sizes: [256, 256]
   steps: 1e8
   action_repeat: 1

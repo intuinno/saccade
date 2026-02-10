@@ -7,7 +7,7 @@ import sys
 os.environ["MUJOCO_GL"] = "osmesa"
 
 import numpy as np
-import ruamel.yaml as yaml
+from ruamel.yaml import YAML
 
 sys.path.append(str(pathlib.Path(__file__).parent))
 
@@ -17,12 +17,60 @@ import tools
 import envs.wrappers as wrappers
 from parallel import Parallel, Damy
 
+import logging
 import torch
 from torch import nn
 from torch import distributions as torchd
+from collections import deque
 
 
 to_np = lambda x: x.detach().cpu().numpy()
+
+dreamer_logger = logging.getLogger(__name__)
+
+
+class CurriculumManager:
+    """Centralized curriculum tracker for navigation tasks.
+
+    Tracks episode outcomes and advances curriculum stage when success rate
+    exceeds a threshold. Supports checkpointing via state_dict/load_state_dict.
+    """
+
+    def __init__(self, stages, threshold, history_length):
+        self._stages = stages
+        self._threshold = threshold
+        self._history_length = history_length
+        self._stage = 0
+        self._outcomes = deque(maxlen=history_length)
+
+    @property
+    def stage(self):
+        return self._stage
+
+    def record_outcome(self, success):
+        self._outcomes.append(bool(success))
+        if self._stage >= len(self._stages) - 1:
+            return
+        if len(self._outcomes) < self._history_length:
+            return
+        success_rate = sum(self._outcomes) / len(self._outcomes)
+        if success_rate > self._threshold:
+            self._stage += 1
+            self._outcomes.clear()
+            dreamer_logger.info(
+                f"Curriculum advanced to stage {self._stage + 1} "
+                f"(max_dist={self._stages[self._stage]['max_distance']})"
+            )
+
+    def state_dict(self):
+        return {
+            "stage": self._stage,
+            "outcomes": list(self._outcomes),
+        }
+
+    def load_state_dict(self, state):
+        self._stage = state["stage"]
+        self._outcomes = deque(state["outcomes"], maxlen=self._history_length)
 
 
 class Dreamer(nn.Module):
@@ -203,6 +251,11 @@ def make_env(config, mode, id):
 
         env = mmjc.MMJCNav(task, config.size, seed=config.seed + id)
         env = wrappers.NormalizeActions(env)
+    elif suite == "mmjcnavcont":
+        import envs.mmjc as mmjc
+
+        env = mmjc.MMJCNavCont(task, config.size, seed=config.seed + id)
+        env = wrappers.NormalizeActions(env)
     elif suite == "mmjchiernav":
         import envs.mmjc as mmjc
 
@@ -267,6 +320,88 @@ def main(config):
     print("Action Space", acts)
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
 
+    # Curriculum management for navigation tasks
+    suite = config.task.split("_", 1)[0]
+    curriculum = None
+    on_episode_done = None
+    if suite == "mmjcnavcont":
+        from envs.mmjc import MMJCNavCont
+        curriculum = CurriculumManager(
+            stages=MMJCNavCont.CURRICULUM_STAGES,
+            threshold=MMJCNavCont.ADVANCE_THRESHOLD,
+            history_length=MMJCNavCont.HISTORY_LENGTH,
+        )
+
+        def sync_curriculum_to_envs(envs_list):
+            stage = curriculum.stage
+            max_dist = MMJCNavCont.CURRICULUM_STAGES[stage]["max_distance"]
+            if max_dist == float("inf"):
+                time_limit = config.time_limit
+            else:
+                time_limit = min(int(10 * max_dist), config.time_limit)
+            for env in envs_list:
+                result = env.set_curriculum_stage(stage)
+                if result is not None:
+                    result()
+                result = env.set_inner_time_limit(time_limit)
+                if result is not None:
+                    result()
+
+        train_goal_distances = []
+        train_episode_steps = []
+
+        def on_episode_done(env_index, score, info):
+            if "goal_distance" in info:
+                train_goal_distances.append(info["goal_distance"])
+            if "episode_steps" in info:
+                train_episode_steps.append(info["episode_steps"])
+            old_stage = curriculum.stage
+            curriculum.record_outcome(score > 0)
+            if curriculum.stage != old_stage:
+                sync_curriculum_to_envs(train_envs)
+
+        sync_curriculum_to_envs(train_envs)
+        sync_curriculum_to_envs(eval_envs)
+
+    elif suite == "mmjchiernav":
+        from envs.mmjc import MMJCHierNav
+        curriculum = CurriculumManager(
+            stages=MMJCHierNav.CURRICULUM_STAGES,
+            threshold=MMJCHierNav.ADVANCE_THRESHOLD,
+            history_length=MMJCHierNav.HISTORY_LENGTH,
+        )
+
+        def sync_curriculum_to_envs(envs_list):
+            stage = curriculum.stage
+            max_dist = MMJCHierNav.CURRICULUM_STAGES[stage]["max_distance"]
+            if max_dist == float("inf"):
+                time_limit = config.time_limit
+            else:
+                time_limit = min(int(10 * max_dist), config.time_limit)
+            for env in envs_list:
+                result = env.set_curriculum_stage(stage)
+                if result is not None:
+                    result()
+                result = env.set_inner_time_limit(time_limit)
+                if result is not None:
+                    result()
+
+        train_goal_distances = []
+        train_episode_steps = []
+
+        def on_episode_done(env_index, score, info):
+            if "goal_distance" in info:
+                train_goal_distances.append(info["goal_distance"])
+            if "episode_steps" in info:
+                train_episode_steps.append(info["episode_steps"])
+            old_stage = curriculum.stage
+            curriculum.record_outcome(score > 0)
+            if curriculum.stage != old_stage:
+                sync_curriculum_to_envs(train_envs)
+
+        sync_curriculum_to_envs(train_envs)
+        sync_curriculum_to_envs(eval_envs)
+
     state = None
     if not config.offline_traindir:
         prefill = max(0, config.prefill - count_steps(config.traindir))
@@ -297,6 +432,7 @@ def main(config):
             logger,
             limit=config.dataset_size,
             steps=prefill,
+            on_episode_done=on_episode_done,
         )
         logger.step += prefill * config.action_repeat
         print(f"Logger: ({logger.step} steps).")
@@ -313,10 +449,32 @@ def main(config):
     ).to(config.device)
     agent.requires_grad_(requires_grad=False)
     if (logdir / "latest.pt").exists():
+        print(f"Resuming from {logdir / 'latest.pt'}")
         checkpoint = torch.load(logdir / "latest.pt")
         agent.load_state_dict(checkpoint["agent_state_dict"])
         tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
         agent._should_pretrain._once = False
+        if curriculum is not None and "curriculum" in checkpoint:
+            curriculum.load_state_dict(checkpoint["curriculum"])
+    if curriculum is not None and hasattr(config, "curriculum_stage") and config.curriculum_stage >= 0:
+        curriculum._stage = config.curriculum_stage
+        curriculum._outcomes.clear()
+        print(f"Curriculum overridden to stage {config.curriculum_stage + 1}")
+    if curriculum is not None:
+        stage = curriculum.stage
+        max_dist = curriculum._stages[stage]["max_distance"]
+        print(f"Curriculum stage {stage + 1}/{len(curriculum._stages)} (max_dist={max_dist})")
+        sync_curriculum_to_envs(train_envs)
+        sync_curriculum_to_envs(eval_envs)
+
+    # Save initial policy so play scripts can start immediately
+    items_to_save = {
+        "agent_state_dict": agent.state_dict(),
+        "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
+    }
+    if curriculum is not None:
+        items_to_save["curriculum"] = curriculum.state_dict()
+    torch.save(items_to_save, logdir / "latest.pt")
 
     # Save initial policy so play scripts can start immediately
     items_to_save = {
@@ -330,6 +488,8 @@ def main(config):
         logger.write()
         if config.eval_episode_num > 0:
             print("Start evaluation.")
+            if curriculum is not None:
+                sync_curriculum_to_envs(eval_envs)
             eval_policy = functools.partial(agent, training=False)
             tools.simulate(
                 eval_policy,
@@ -349,7 +509,11 @@ def main(config):
             "agent_state_dict": agent.state_dict(),
             "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
         }
+        if curriculum is not None:
+            items_to_save["curriculum"] = curriculum.state_dict()
         torch.save(items_to_save, logdir / f"policy_{agent._step}.pt")
+        train_goal_distances.clear()
+        train_episode_steps.clear()
         state = tools.simulate(
             agent,
             train_envs,
@@ -359,11 +523,24 @@ def main(config):
             limit=config.dataset_size,
             steps=config.eval_every,
             state=state,
+            on_episode_done=on_episode_done,
         )
+        if train_goal_distances:
+            logger.scalar(
+                "train_avg_goal_distance",
+                sum(train_goal_distances) / len(train_goal_distances),
+            )
+        if train_episode_steps:
+            logger.scalar(
+                "train_avg_episode_steps",
+                sum(train_episode_steps) / len(train_episode_steps),
+            )
         items_to_save = {
             "agent_state_dict": agent.state_dict(),
             "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
         }
+        if curriculum is not None:
+            items_to_save["curriculum"] = curriculum.state_dict()
         torch.save(items_to_save, logdir / "latest.pt")
     for env in train_envs + eval_envs:
         try:
@@ -376,7 +553,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--configs", nargs="+")
     args, remaining = parser.parse_known_args()
-    configs = yaml.safe_load(
+    _yaml = YAML(typ='safe', pure=True)
+    configs = _yaml.load(
         (pathlib.Path(sys.argv[0]).parent / "configs.yaml").read_text()
     )
 

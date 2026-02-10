@@ -54,6 +54,8 @@ class MMJC:
     def step(self, action):
         obs, reward, terminated, truncated, info = self._env.step(action)
         done = terminated or truncated
+        if truncated and not terminated:
+            info["discount"] = np.array(1.0, dtype=np.float32)
         obs["is_first"] = False
         obs["is_last"] = done
         obs["is_terminal"] = terminated
@@ -86,7 +88,8 @@ class MMJCNav:
     """
 
     CURRICULUM_STAGES = [
-        {"max_distance": 3},
+        {"max_distance": 1},
+        {"max_distance": 2},
         {"max_distance": 5},
         {"max_distance": 8},
         {"max_distance": 11},
@@ -94,10 +97,10 @@ class MMJCNav:
     ]
     ADVANCE_THRESHOLD = 0.5
     HISTORY_LENGTH = 100
-    WALKABLE_CHARS = {'.', 'P', 'G'}
+    WALKABLE_CHARS = {' ', 'P', 'G'}
 
     def __init__(self, task, size=(64, 64), seed=0, render_mode=None,
-                 n_heading_bins=8, goal_radius=1.0):
+                 n_heading_bins=8, goal_radius=0.8):
         import gymnasium
         import mmjc_env
 
@@ -191,12 +194,12 @@ class MMJCNav:
         return obs
 
     def _get_floor_cells(self, maze_map):
-        """Extract walkable floor cell positions in grid coordinates.
+        """Extract walkable floor cell positions in agent_pos coordinates.
 
-        The maze_map entity_layer has an outer wall border, so map index
-        (row, col) corresponds to grid coordinate x = col - 1.  The y-axis
-        is flipped: agent_pos y increases upward while maze_map rows increase
-        downward, giving grid y = rows - 2 - row.
+        The maze_map entity_layer has an outer wall border.  X maps
+        directly (col-1), but Y must be flipped because entity_layer
+        rows increase top-to-bottom while agent_pos[1] increases
+        bottom-to-top (MuJoCo Y-up convention).
         """
         floor_cells = []
         rows, cols = maze_map.shape
@@ -204,20 +207,71 @@ class MMJCNav:
             for c in range(cols):
                 if maze_map[r, c] in self.WALKABLE_CHARS:
                     gx = c - 1
-                    gy = rows - 2 - r
+                    gy = (rows - 2) - r  # flip Y to match agent_pos
                     floor_cells.append([float(gx), float(gy)])
         return np.array(floor_cells, dtype=np.float32)
 
-    def _select_goal(self, agent_pos, floor_cells):
-        """Select a random floor cell within curriculum distance as the goal."""
+    def _bfs_distances(self, maze_map, agent_pos):
+        """BFS from agent cell, return dict mapping (gx, gy) -> path distance."""
+        rows, cols = maze_map.shape
+        ac = int(agent_pos[0]) + 1          # agent gx -> col
+        ar = (rows - 2) - int(agent_pos[1]) # agent gy -> row
+        dist = {}
+        queue = deque([(ar, ac, 0)])
+        visited = set()
+        visited.add((ar, ac))
+        while queue:
+            r, c, d = queue.popleft()
+            gx = c - 1
+            gy = (rows - 2) - r
+            dist[(gx, gy)] = d
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols and (nr, nc) not in visited:
+                    if maze_map[nr, nc] in self.WALKABLE_CHARS:
+                        visited.add((nr, nc))
+                        queue.append((nr, nc, d + 1))
+        return dist
+
+    def _select_goal(self, agent_pos, agent_dir, floor_cells, maze_map):
+        """Select a random floor cell in front of the agent within curriculum distance."""
         max_dist = self.CURRICULUM_STAGES[self._curriculum_stage]["max_distance"]
-        distances = np.linalg.norm(floor_cells - agent_pos, axis=1)
-        # Exclude cells too close to agent (< 1.0) to avoid trivial goals
-        valid_mask = (distances >= 1.0) & (distances <= max_dist)
+        bfs_dist = self._bfs_distances(maze_map, agent_pos)
+        offsets = floor_cells - agent_pos
+        euclidean_distances = np.linalg.norm(offsets, axis=1)
+        # Look up BFS path distance for each floor cell
+        path_distances = np.array([
+            bfs_dist.get((int(fc[0]), int(fc[1])), float('inf'))
+            for fc in floor_cells
+        ], dtype=np.float32)
+        # Only place goals in front of the agent (positive dot product with heading)
+        heading_norm = np.linalg.norm(agent_dir)
+        if heading_norm > 0:
+            heading = agent_dir / heading_norm
+            cos_angles = (offsets @ heading) / np.maximum(euclidean_distances, 1e-8)
+            front_mask = cos_angles > 0.707  # 90-degree cone (±45° from heading)
+        else:
+            front_mask = np.ones(len(floor_cells), dtype=bool)
+        valid_mask = front_mask & (euclidean_distances >= self._goal_radius) & (path_distances <= max_dist)
         valid_indices = np.where(valid_mask)[0]
         if len(valid_indices) == 0:
-            # Fallback: pick any floor cell that isn't the agent's cell
-            valid_mask = distances >= 1.0
+            # Gradually increase max_dist to find a forward goal
+            search_dist = max_dist
+            max_possible = float(path_distances[np.isfinite(path_distances)].max()) if np.any(np.isfinite(path_distances)) else max_dist
+            while search_dist < max_possible:
+                search_dist += 1.0
+                valid_mask = front_mask & (euclidean_distances >= self._goal_radius) & (path_distances <= search_dist)
+                valid_indices = np.where(valid_mask)[0]
+                if len(valid_indices) > 0:
+                    logger.warning("Goal select fallback: expanded front search to dist=%.1f", search_dist)
+                    break
+        if len(valid_indices) == 0:
+            logger.warning("Goal select fallback: no front cells at any distance, using any nearby cell")
+            valid_mask = (euclidean_distances >= self._goal_radius) & (path_distances <= max_dist)
+            valid_indices = np.where(valid_mask)[0]
+        if len(valid_indices) == 0:
+            logger.warning("Goal select fallback: no nearby cells, using any cell")
+            valid_mask = euclidean_distances >= self._goal_radius
             valid_indices = np.where(valid_mask)[0]
         chosen_idx = self._rng.choice(valid_indices)
         return floor_cells[chosen_idx]
@@ -239,9 +293,10 @@ class MMJCNav:
     def reset(self):
         base_obs, info = self._env.reset()
         agent_pos = info["agent_pos"]
+        agent_dir = info["agent_dir"]
         maze_map = info["maze_map"]
         floor_cells = self._get_floor_cells(maze_map)
-        self._goal_pos = self._select_goal(agent_pos, floor_cells)
+        self._goal_pos = self._select_goal(agent_pos, agent_dir, floor_cells, maze_map)
         return self._build_obs(base_obs, info, True, False, False)
 
     def step(self, action):
@@ -256,10 +311,15 @@ class MMJCNav:
             reward = 1.0
             terminated = True
             truncated = False
-        elif base_terminated or base_truncated:
+        elif base_terminated:
+            reward = 0.0
+            terminated = True
+            truncated = False
+        elif base_truncated:
             reward = 0.0
             terminated = False
             truncated = True
+            info["discount"] = np.array(1.0, dtype=np.float32)
         else:
             reward = 0.0
             terminated = False
@@ -348,6 +408,287 @@ class _TaxiActor(nn.Module):
         return self.mu(features)
 
 
+class MMJCNavCont:
+    """Navigation wrapper with continuous observations, sparse reward, and curriculum.
+
+    Like MMJCNav (non-hierarchical, direct continuous motor actions) but with
+    continuous observations like MMJCHierNav: normalised position, target,
+    heading, and raw proprioceptors.  Curriculum starts at max_distance 1.
+    """
+
+    CURRICULUM_STAGES = [
+        {"max_distance": 1},
+        {"max_distance": 2},
+        {"max_distance": 3},
+        {"max_distance": 5},
+        {"max_distance": 8},
+        {"max_distance": 11},
+        {"max_distance": float("inf")},
+    ]
+    ADVANCE_THRESHOLD = 0.5
+    HISTORY_LENGTH = 100
+    WALKABLE_CHARS = {' ', 'P', 'G'}
+
+    def __init__(self, task, size=(64, 64), seed=0, render_mode=None,
+                 goal_radius=0.8):
+        import gymnasium
+        import mmjc_env
+
+        # Create env with render_mode="human" to get 256x256 camera,
+        # then override to rgb_array so render() returns frames without
+        # opening a pygame window.
+        self._env = gymnasium.make(
+            task, targets_per_room=1, target_reward=False,
+            global_observables=True, render_mode="human",
+        )
+        self._env.unwrapped.render_mode = render_mode
+        self._size = size
+        self._seed = seed
+        self._rng = np.random.default_rng(seed)
+
+        self._maze_size = int(task.split("-")[-1])
+        self._goal_radius = goal_radius
+
+        self._sensor_dim = self._env.observation_space["sensors"].shape[0]
+
+        # Curriculum state
+        self._curriculum_stage = 0
+
+        self._goal_pos = None
+        self._last_info = None
+        self._trajectory = []
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        try:
+            return getattr(self._env, name)
+        except AttributeError:
+            raise ValueError(name)
+
+    def set_curriculum_stage(self, stage):
+        self._curriculum_stage = max(0, min(stage, len(self.CURRICULUM_STAGES) - 1))
+
+    def set_inner_time_limit(self, time_limit):
+        """Set the inner mmjc_env time limit (low-level MuJoCo steps)."""
+        base = self._env.unwrapped
+        base.time_limit = time_limit
+        # Walk the dm_env wrapper chain to find the composer.Environment
+        env = base.mm_env
+        while hasattr(env, 'env'):
+            env = env.env
+        env._time_limit = time_limit - 1e-3
+
+    @property
+    def observation_space(self):
+        spaces = {}
+        spaces["image"] = gym.spaces.Box(0, 255, (64, 64, 3), dtype=np.uint8)
+        spaces["current_position"] = gym.spaces.Box(-1, 1, (2,), dtype=np.float32)
+        spaces["target_position"] = gym.spaces.Box(-1, 1, (2,), dtype=np.float32)
+        spaces["heading"] = gym.spaces.Box(-1, 1, (2,), dtype=np.float32)
+        spaces["proprioceptors"] = gym.spaces.Box(
+            -np.inf, np.inf, (self._sensor_dim,), dtype=np.float64
+        )
+        spaces["is_first"] = gym.spaces.Box(0, 1, (), dtype=bool)
+        spaces["is_last"] = gym.spaces.Box(0, 1, (), dtype=bool)
+        spaces["is_terminal"] = gym.spaces.Box(0, 1, (), dtype=bool)
+        return gym.spaces.Dict(spaces)
+
+    @property
+    def action_space(self):
+        space = self._env.action_space
+        return gym.spaces.Box(
+            low=space.low, high=space.high, shape=space.shape, dtype=np.float32,
+        )
+
+    def _normalize_pos(self, pos):
+        """Map grid position [0, maze_size-1] -> [-1, 1]."""
+        return (np.asarray(pos, dtype=np.float32) / (self._maze_size - 1)) * 2 - 1
+
+    def _build_obs(self, base_obs, info, is_first, is_last, is_terminal):
+        agent_pos = info["agent_pos"]
+        agent_dir = info["agent_dir"]
+        norm = np.linalg.norm(agent_dir)
+        heading = (agent_dir / norm).astype(np.float32) if norm > 0 else np.zeros(2, dtype=np.float32)
+        return {
+            "image": base_obs["image"],
+            "current_position": self._normalize_pos(agent_pos),
+            "target_position": self._normalize_pos(self._goal_pos),
+            "heading": heading,
+            "proprioceptors": base_obs["sensors"],
+            "is_first": is_first,
+            "is_last": is_last,
+            "is_terminal": is_terminal,
+        }
+
+    def _get_floor_cells(self, maze_map):
+        floor_cells = []
+        rows, cols = maze_map.shape
+        for r in range(rows):
+            for c in range(cols):
+                if maze_map[r, c] in self.WALKABLE_CHARS:
+                    gx = c - 1
+                    gy = (rows - 2) - r  # flip Y to match agent_pos
+                    floor_cells.append([float(gx), float(gy)])
+        return np.array(floor_cells, dtype=np.float32)
+
+    def _bfs_distances(self, maze_map, agent_pos):
+        """BFS from agent cell, return dict mapping (gx, gy) -> path distance."""
+        rows, cols = maze_map.shape
+        ac = int(agent_pos[0]) + 1          # agent gx -> col
+        ar = (rows - 2) - int(agent_pos[1]) # agent gy -> row
+        dist = {}
+        queue = deque([(ar, ac, 0)])
+        visited = set()
+        visited.add((ar, ac))
+        while queue:
+            r, c, d = queue.popleft()
+            gx = c - 1
+            gy = (rows - 2) - r
+            dist[(gx, gy)] = d
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols and (nr, nc) not in visited:
+                    if maze_map[nr, nc] in self.WALKABLE_CHARS:
+                        visited.add((nr, nc))
+                        queue.append((nr, nc, d + 1))
+        return dist
+
+    def _select_goal(self, agent_pos, agent_dir, floor_cells, maze_map):
+        max_dist = self.CURRICULUM_STAGES[self._curriculum_stage]["max_distance"]
+        bfs_dist = self._bfs_distances(maze_map, agent_pos)
+        # Compare distances using cell centers
+        cell_centers = floor_cells + 0.5
+        offsets = cell_centers - agent_pos
+        euclidean_distances = np.linalg.norm(offsets, axis=1)
+        # Look up BFS path distance for each floor cell
+        path_distances = np.array([
+            bfs_dist.get((int(fc[0]), int(fc[1])), float('inf'))
+            for fc in floor_cells
+        ], dtype=np.float32)
+        # Only place goals in front of the agent (positive dot product with heading)
+        heading_norm = np.linalg.norm(agent_dir)
+        if heading_norm > 0:
+            heading = agent_dir / heading_norm
+            cos_angles = (offsets @ heading) / np.maximum(euclidean_distances, 1e-8)
+            front_mask = cos_angles > 0.707  # 90-degree cone (±45° from heading)
+        else:
+            front_mask = np.ones(len(cell_centers), dtype=bool)
+        valid_mask = front_mask & (euclidean_distances >= self._goal_radius) & (path_distances <= max_dist)
+        valid_indices = np.where(valid_mask)[0]
+        if len(valid_indices) == 0:
+            # Gradually increase max_dist to find a forward goal
+            search_dist = max_dist
+            max_possible = float(path_distances[np.isfinite(path_distances)].max()) if np.any(np.isfinite(path_distances)) else max_dist
+            while search_dist < max_possible:
+                search_dist += 1.0
+                valid_mask = front_mask & (euclidean_distances >= self._goal_radius) & (path_distances <= search_dist)
+                valid_indices = np.where(valid_mask)[0]
+                if len(valid_indices) > 0:
+                    logger.warning("Goal select fallback: expanded front search to dist=%.1f", search_dist)
+                    break
+        if len(valid_indices) == 0:
+            logger.warning("Goal select fallback: no front cells at any distance, using any nearby cell")
+            valid_mask = (euclidean_distances >= self._goal_radius) & (path_distances <= max_dist)
+            valid_indices = np.where(valid_mask)[0]
+        if len(valid_indices) == 0:
+            logger.warning("Goal select fallback: no nearby cells, using any cell")
+            valid_mask = euclidean_distances >= self._goal_radius
+            valid_indices = np.where(valid_mask)[0]
+        chosen_idx = self._rng.choice(valid_indices)
+        # Return cell center, not corner
+        return cell_centers[chosen_idx]
+
+    def reset(self):
+        base_obs, info = self._env.reset()
+        agent_pos = info["agent_pos"]
+        agent_dir = info["agent_dir"]
+        maze_map = info["maze_map"]
+        floor_cells = self._get_floor_cells(maze_map)
+        self._goal_pos = self._select_goal(agent_pos, agent_dir, floor_cells, maze_map)
+        self._goal_distance = float(np.linalg.norm(agent_pos - self._goal_pos))
+        self._last_info = info
+        self._trajectory = [(agent_pos[0], agent_pos[1])]
+        obs = self._build_obs(base_obs, info, True, False, False)
+        obs["log_curriculum_stage"] = 0.0
+        return obs
+
+    def step(self, action):
+        base_obs, _, base_terminated, base_truncated, info = self._env.step(action)
+
+        agent_pos = info["agent_pos"]
+        self._last_info = info
+        self._trajectory.append((agent_pos[0], agent_pos[1]))
+        dist_to_goal = np.linalg.norm(agent_pos - self._goal_pos)
+        reached_goal = dist_to_goal < self._goal_radius
+
+        if reached_goal:
+            reward = 1.0
+            terminated = True
+            truncated = False
+        elif base_terminated:
+            reward = 0.0
+            terminated = True
+            truncated = False
+        elif base_truncated:
+            reward = 0.0
+            terminated = False
+            truncated = True
+            info["discount"] = np.array(1.0, dtype=np.float32)
+        else:
+            reward = 0.0
+            terminated = False
+            truncated = False
+
+        done = terminated or truncated
+
+        obs = self._build_obs(base_obs, info, False, done, terminated)
+        obs["log_curriculum_stage"] = float(self._curriculum_stage + 1) if done else 0.0
+        if done:
+            info["goal_distance"] = self._goal_distance
+        info["curriculum_stage"] = self._curriculum_stage + 1
+        return obs, reward, done, info
+
+    def render(self, *args, **kwargs):
+        frame = self._env.render()
+        if frame is None or self._goal_pos is None:
+            return frame
+
+        cam_res = self._env.unwrapped.camera_resolution
+        maze_map = self._last_info.get("maze_map") if self._last_info else None
+        if maze_map is None:
+            return frame
+
+        frame = frame.copy()
+        height = maze_map.shape[0]
+        scale = cam_res / height
+        offset_x = 2 * cam_res
+
+        # Draw trajectory as a polyline on the 3rd panel (maze map).
+        if len(self._trajectory) > 1:
+            pts = []
+            for px, py in self._trajectory:
+                ix = int((px + 1) * scale) + offset_x
+                iy = int((height - 1 - py) * scale)
+                pts.append((ix, iy))
+            cv2.polylines(
+                frame, [np.array(pts, dtype=np.int32)],
+                isClosed=False, color=(180, 180, 180), thickness=1,
+            )
+
+        # Draw goal marker (green circle).
+        gx = int((self._goal_pos[0] + 1) * scale)
+        gy = int((height - 1 - self._goal_pos[1]) * scale)
+        radius = max(3, int(scale * 0.45))
+        cv2.circle(frame, (offset_x + gx, gy), radius, (0, 255, 0), -1)
+        cv2.circle(frame, (offset_x + gx, gy), radius, (0, 0, 0), 1)
+
+        return frame
+
+    def close(self):
+        self._env.close()
+
+
 class MMJCHierNav:
     """Hierarchical navigation wrapper with continuous observations.
 
@@ -363,10 +704,10 @@ class MMJCHierNav:
     ]
     ADVANCE_THRESHOLD = 0.5
     HISTORY_LENGTH = 100
-    WALKABLE_CHARS = {'.', 'P', 'G'}
+    WALKABLE_CHARS = {' ', 'P', 'G'}
 
     def __init__(self, task, size=(64, 64), seed=0, model_path="",
-                 k_steps=20, hidden_sizes=(256, 256), goal_radius=1.0,
+                 k_steps=20, hidden_sizes=(256, 256), goal_radius=0.5,
                  render_mode=None):
         import gymnasium
         import mmjc_env
@@ -402,7 +743,6 @@ class MMJCHierNav:
 
         # Curriculum state
         self._curriculum_stage = 0
-        self._episode_outcomes = deque(maxlen=self.HISTORY_LENGTH)
 
         # Current goal and last base obs (set on each reset)
         self._goal_pos = None
@@ -490,43 +830,98 @@ class MMJCHierNav:
             for c in range(cols):
                 if maze_map[r, c] in self.WALKABLE_CHARS:
                     gx = c - 1
-                    gy = rows - 2 - r
+                    gy = (rows - 2) - r  # flip Y to match agent_pos
                     floor_cells.append([float(gx), float(gy)])
         return np.array(floor_cells, dtype=np.float32)
 
-    def _select_goal(self, agent_pos, floor_cells):
+    def _bfs_distances(self, maze_map, agent_pos):
+        """BFS from agent cell, return dict mapping (gx, gy) -> path distance."""
+        rows, cols = maze_map.shape
+        ac = int(agent_pos[0]) + 1          # agent gx -> col
+        ar = (rows - 2) - int(agent_pos[1]) # agent gy -> row
+        dist = {}
+        queue = deque([(ar, ac, 0)])
+        visited = set()
+        visited.add((ar, ac))
+        while queue:
+            r, c, d = queue.popleft()
+            gx = c - 1
+            gy = (rows - 2) - r
+            dist[(gx, gy)] = d
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols and (nr, nc) not in visited:
+                    if maze_map[nr, nc] in self.WALKABLE_CHARS:
+                        visited.add((nr, nc))
+                        queue.append((nr, nc, d + 1))
+        return dist
+
+    def _select_goal(self, agent_pos, agent_dir, floor_cells, maze_map):
         max_dist = self.CURRICULUM_STAGES[self._curriculum_stage]["max_distance"]
+        bfs_dist = self._bfs_distances(maze_map, agent_pos)
         # Compare distances using cell centers
         cell_centers = floor_cells + 0.5
-        distances = np.linalg.norm(cell_centers - agent_pos, axis=1)
-        valid_mask = (distances >= 1.0) & (distances <= max_dist)
+        offsets = cell_centers - agent_pos
+        euclidean_distances = np.linalg.norm(offsets, axis=1)
+        # Look up BFS path distance for each floor cell
+        path_distances = np.array([
+            bfs_dist.get((int(fc[0]), int(fc[1])), float('inf'))
+            for fc in floor_cells
+        ], dtype=np.float32)
+        # Only place goals in front of the agent (positive dot product with heading)
+        heading_norm = np.linalg.norm(agent_dir)
+        if heading_norm > 0:
+            heading = agent_dir / heading_norm
+            cos_angles = (offsets @ heading) / np.maximum(euclidean_distances, 1e-8)
+            front_mask = cos_angles > 0.707  # 90-degree cone (±45° from heading)
+        else:
+            front_mask = np.ones(len(cell_centers), dtype=bool)
+        valid_mask = front_mask & (euclidean_distances >= self._goal_radius) & (path_distances <= max_dist)
         valid_indices = np.where(valid_mask)[0]
         if len(valid_indices) == 0:
-            valid_mask = distances >= 1.0
+            # Gradually increase max_dist to find a forward goal
+            search_dist = max_dist
+            max_possible = float(path_distances[np.isfinite(path_distances)].max()) if np.any(np.isfinite(path_distances)) else max_dist
+            while search_dist < max_possible:
+                search_dist += 1.0
+                valid_mask = front_mask & (euclidean_distances >= self._goal_radius) & (path_distances <= search_dist)
+                valid_indices = np.where(valid_mask)[0]
+                if len(valid_indices) > 0:
+                    logger.warning("Goal select fallback: expanded front search to dist=%.1f", search_dist)
+                    break
+        if len(valid_indices) == 0:
+            logger.warning("Goal select fallback: no front cells at any distance, using any nearby cell")
+            valid_mask = (euclidean_distances >= self._goal_radius) & (path_distances <= max_dist)
+            valid_indices = np.where(valid_mask)[0]
+        if len(valid_indices) == 0:
+            logger.warning("Goal select fallback: no nearby cells, using any cell")
+            valid_mask = euclidean_distances >= self._goal_radius
             valid_indices = np.where(valid_mask)[0]
         chosen_idx = self._rng.choice(valid_indices)
         # Return cell center, not corner
         return cell_centers[chosen_idx]
 
-    def _maybe_advance_curriculum(self):
-        if self._curriculum_stage >= len(self.CURRICULUM_STAGES) - 1:
-            return
-        if len(self._episode_outcomes) < self.HISTORY_LENGTH:
-            return
-        success_rate = np.mean(self._episode_outcomes)
-        if success_rate > self.ADVANCE_THRESHOLD:
-            self._curriculum_stage += 1
-            logger.info(
-                f"Curriculum advanced to stage {self._curriculum_stage + 1} "
-                f"(max_dist={self.CURRICULUM_STAGES[self._curriculum_stage]['max_distance']})"
-            )
+    def set_curriculum_stage(self, stage):
+        self._curriculum_stage = max(0, min(stage, len(self.CURRICULUM_STAGES) - 1))
+
+    def set_inner_time_limit(self, time_limit):
+        """Set the inner mmjc_env time limit (low-level MuJoCo steps)."""
+        base = self._env.unwrapped
+        base.time_limit = time_limit
+        # Walk the dm_env wrapper chain to find the composer.Environment
+        env = base.mm_env
+        while hasattr(env, 'env'):
+            env = env.env
+        env._time_limit = time_limit - 1e-3
 
     def reset(self):
         base_obs, info = self._env.reset()
         agent_pos = info["agent_pos"]
+        agent_dir = info["agent_dir"]
         maze_map = info["maze_map"]
         floor_cells = self._get_floor_cells(maze_map)
-        self._goal_pos = self._select_goal(agent_pos, floor_cells)
+        self._goal_pos = self._select_goal(agent_pos, agent_dir, floor_cells, maze_map)
+        self._goal_distance = float(np.linalg.norm(agent_pos - self._goal_pos))
         self._last_base_obs = base_obs
         self._last_info = info
         self._trajectory = [(agent_pos[0], agent_pos[1])]
@@ -574,6 +969,8 @@ class MMJCHierNav:
             if base_term or base_trunc or reached_goal:
                 terminated = base_term or reached_goal
                 truncated = base_trunc and not reached_goal
+                if truncated:
+                    info["discount"] = np.array(1.0, dtype=np.float32)
                 break
 
         if reached_goal:
@@ -583,16 +980,14 @@ class MMJCHierNav:
 
         done = terminated or truncated
 
-        if done:
-            self._episode_outcomes.append(reached_goal)
-            self._maybe_advance_curriculum()
-
         obs = self._build_obs(
             self._last_base_obs, self._last_info, False, done, terminated,
         )
         # log_ keys are summed over the episode by the training loop;
         # only set on the terminal step so the sum equals the value.
         obs["log_curriculum_stage"] = float(self._curriculum_stage + 1) if done else 0.0
+        if done:
+            info["goal_distance"] = self._goal_distance
         info["curriculum_stage"] = self._curriculum_stage + 1
         return obs, reward, done, info
 

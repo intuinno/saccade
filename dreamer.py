@@ -266,6 +266,21 @@ def make_env(config, mode, id):
             hidden_sizes=config.hidden_sizes,
         )
         env = wrappers.OneHotAction(env)
+    elif suite == "mmjcnavego":
+        import envs.mmjc as mmjc
+
+        env = mmjc.MMJCNavEgo(task, config.size, seed=config.seed + id)
+        env = wrappers.NormalizeActions(env)
+    elif suite == "mmjchiernavego":
+        import envs.mmjc as mmjc
+
+        env = mmjc.MMJCHierNavEgo(
+            task, config.size, seed=config.seed + id,
+            model_path=config.model_path,
+            k_steps=config.k_steps,
+            hidden_sizes=config.hidden_sizes,
+        )
+        env = wrappers.OneHotAction(env)
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit)
@@ -374,6 +389,84 @@ def main(config):
         def sync_curriculum_to_envs(envs_list):
             stage = curriculum.stage
             max_dist = MMJCHierNav.CURRICULUM_STAGES[stage]["max_distance"]
+            if max_dist == float("inf"):
+                time_limit = config.time_limit
+            else:
+                time_limit = min(int(10 * max_dist), config.time_limit)
+            for env in envs_list:
+                result = env.set_curriculum_stage(stage)
+                if result is not None:
+                    result()
+                result = env.set_inner_time_limit(time_limit)
+                if result is not None:
+                    result()
+
+        train_goal_distances = []
+        train_episode_steps = []
+
+        def on_episode_done(env_index, score, info):
+            if "goal_distance" in info:
+                train_goal_distances.append(info["goal_distance"])
+            if "episode_steps" in info:
+                train_episode_steps.append(info["episode_steps"])
+            old_stage = curriculum.stage
+            curriculum.record_outcome(score > 0)
+            if curriculum.stage != old_stage:
+                sync_curriculum_to_envs(train_envs)
+
+        sync_curriculum_to_envs(train_envs)
+        sync_curriculum_to_envs(eval_envs)
+
+    elif suite == "mmjcnavego":
+        from envs.mmjc import MMJCNavEgo
+        curriculum = CurriculumManager(
+            stages=MMJCNavEgo.CURRICULUM_STAGES,
+            threshold=MMJCNavEgo.ADVANCE_THRESHOLD,
+            history_length=MMJCNavEgo.HISTORY_LENGTH,
+        )
+
+        def sync_curriculum_to_envs(envs_list):
+            stage = curriculum.stage
+            max_dist = MMJCNavEgo.CURRICULUM_STAGES[stage]["max_distance"]
+            if max_dist == float("inf"):
+                time_limit = config.time_limit
+            else:
+                time_limit = min(int(10 * max_dist), config.time_limit)
+            for env in envs_list:
+                result = env.set_curriculum_stage(stage)
+                if result is not None:
+                    result()
+                result = env.set_inner_time_limit(time_limit)
+                if result is not None:
+                    result()
+
+        train_goal_distances = []
+        train_episode_steps = []
+
+        def on_episode_done(env_index, score, info):
+            if "goal_distance" in info:
+                train_goal_distances.append(info["goal_distance"])
+            if "episode_steps" in info:
+                train_episode_steps.append(info["episode_steps"])
+            old_stage = curriculum.stage
+            curriculum.record_outcome(score > 0)
+            if curriculum.stage != old_stage:
+                sync_curriculum_to_envs(train_envs)
+
+        sync_curriculum_to_envs(train_envs)
+        sync_curriculum_to_envs(eval_envs)
+
+    elif suite == "mmjchiernavego":
+        from envs.mmjc import MMJCHierNavEgo
+        curriculum = CurriculumManager(
+            stages=MMJCHierNavEgo.CURRICULUM_STAGES,
+            threshold=MMJCHierNavEgo.ADVANCE_THRESHOLD,
+            history_length=MMJCHierNavEgo.HISTORY_LENGTH,
+        )
+
+        def sync_curriculum_to_envs(envs_list):
+            stage = curriculum.stage
+            max_dist = MMJCHierNavEgo.CURRICULUM_STAGES[stage]["max_distance"]
             if max_dist == float("inf"):
                 time_limit = config.time_limit
             else:
